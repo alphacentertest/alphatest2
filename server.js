@@ -6,30 +6,30 @@ const port = 3000;
 app.use(express.json());
 app.use(express.static('public'));
 app.use(session({
-    secret: 'mysecretkey', // Секретный ключ для сессий
+    secret: 'mysecretkey', // Секретний ключ для сессій
     resave: false,
     saveUninitialized: false
 }));
 
-const correctPassword = 'test123'; // Пароль для входа
+const correctPassword = 'test123'; // Пароль для входу
 
-// Главная страница — логин
+// Головна страниця — логін
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/public/login.html');
 });
 
-// Проверка пароля
+// Перевірка паролю
 app.post('/login', (req, res) => {
     const { password } = req.body;
     if (password === correctPassword) {
         req.session.authenticated = true;
         res.status(200).send('OK');
     } else {
-        res.status(401).send('Неверный пароль');
+        res.status(401).send('Невірний пароль');
     }
 });
 
-// Страница теста — только после авторизации
+// Страниця теста — тільки після авторизації
 app.get('/quiz', (req, res) => {
     if (!req.session.authenticated) {
         return res.redirect('/');
