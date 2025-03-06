@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Вход в тест</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Введите пароль</h1>
+        <input type="password" id="passwordInput" placeholder="Пароль">
+        <button onclick="login()">Войти</button>
+        <p id="error" class="error"></p>
+    </div>
+    <script>
+        function login() {
+            const password = document.getElementById('passwordInput').value;
+            fetch('/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            })
+            .then(response => {
+                if (response.ok) {
+                    window.location.href = '/quiz';
+                } else {
+                    document.getElementById('error').textContent = 'Неверный пароль!';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
