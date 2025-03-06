@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ukr">
 <head>
     <meta charset="UTF-8">
-    <title>Вход в тест</title>
+    <title>Вхід в тест</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
     <div class="container">
-        <h1>Введите пароль</h1>
+        <h1>Введіть пароль</h1>
         <input type="password" id="passwordInput" placeholder="Пароль">
-        <button onclick="login()">Войти</button>
+        <button onclick="login()">Війти</button>
         <p id="error" class="error"></p>
     </div>
     <script>
@@ -24,7 +24,7 @@
                 if (response.ok) {
                     window.location.href = '/quiz';
                 } else {
-                    document.getElementById('error').textContent = 'Неверный пароль!';
+                    document.getElementById('error').textContent = 'Невірннй пароль!';
                 }
             });
         }
