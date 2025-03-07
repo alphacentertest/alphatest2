@@ -8,6 +8,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json()); // Додаємо для POST-запитів із JSON
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
+<<<<<<< HEAD
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: true
