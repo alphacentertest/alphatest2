@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
@@ -103,4 +104,3 @@ app.get('/result', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
-});
