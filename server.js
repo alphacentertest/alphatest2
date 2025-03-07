@@ -27,7 +27,7 @@ app.get('/', (req, res) => {
 const loadQuestions = async () => {
   try {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile('questions.xlsx').catch(err => {
+    await workbook.xlsx.readFile(path.join(__dirname, 'questions.xlsx')).catch(err => {
       throw new Error(`Не удалось прочитать questions.xlsx: ${err.message}`);
     });
     const sheet = workbook.getWorksheet('Questions');
