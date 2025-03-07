@@ -71,9 +71,6 @@ app.post('/login', (req, res) => {
 });
 
 app.get('/questions', async (req, res) => {
-  if (!req.session.loggedIn) {
-    return res.status(403).send('Будь ласка, увійдіть спочатку');
-  }
   try {
     const questions = await loadQuestions();
     res.json(questions);
