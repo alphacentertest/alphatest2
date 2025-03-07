@@ -76,7 +76,7 @@ app.get('/questions', async (req, res) => {
     res.json(questions);
   } catch (error) {
     console.error('Ошибка в /questions:', error.message);
-    res.status(500).json({ error: 'Помилка сервера при завантаженні питань' });
+    res.status(500).json({ error: `Помилка сервера при завантаженні питань: ${error.message}` });
   }
 });
 
