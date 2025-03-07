@@ -5,30 +5,58 @@ const XLSX = require('xlsx');
 const app = express();
 
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json()); // Додаємо для POST-запитів із JSON
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
-<<<<<<< HEAD
   secret: 'your-secret-key',
   resave: false,
-  saveUninitialized: true
+  saveUninitialized: true,
+  cookie: { secure: false }
 }));
+app.use((req, res, next) => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.header('Access-Control-Allow-Origin', '*'); // Для тестов
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  console.log('Session:', req.session);
+  next();
+});
 
 const loadQuestions = () => {
-  const workbook = XLSX.readFile('questions.xlsx');
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(sheet);
+  try {
+    const workbook = XLSX.readFile('questions.xlsx');
+    const sheet = workbook.Sheets['Questions'];
+    if (!sheet) throw new Error('Лист "Questions" не найден');
+    const jsonData = XLSX.utils.sheet_to_json(sheet);
+    return jsonData.map(row => ({
+      question: row.Question,
+      options: [row['Option 1'], row['Option 2'], row['Option 3'], row['Option 4'], row['Option 5'], row['Option 6']].filter(Boolean),
+      correctAnswers: [row.CorrectAnswer1, row.CorrectAnswer2, row.CorrectAnswer3].filter(Boolean),
+      type: row.Type,
+      points: row.Points || 0
+    }));
+  } catch (error) {
+    console.error('Ошибка при загрузке questions.xlsx:', error.message);
+    throw new Error('Не удалось загрузить вопросы');
+  }
 };
+
+app.post('/login', (req, res) => {
+  req.session.loggedIn = true;
+  res.json({ success: true });
+});
 
 app.get('/questions', (req, res) => {
   if (!req.session.loggedIn) {
     return res.status(403).send('Будь ласка, увійдіть спочатку');
   }
-  const questions = loadQuestions();
-  res.json(questions);
+  try {
+    const questions = loadQuestions();
+    res.json(questions);
+  } catch (error) {
+    res.status(500).send('Помилка сервера при завантаженні питань');
+  }
 });
 
-// Збереження відповіді для конкретного питання
 app.post('/answer', (req, res) => {
   if (!req.session.loggedIn) {
     return res.status(403).send('Не авторизовано');
@@ -39,48 +67,40 @@ app.post('/answer', (req, res) => {
   res.json({ success: true });
 });
 
-// Підрахунок результату
 app.get('/result', (req, res) => {
   if (!req.session.loggedIn) {
     return res.status(403).send('Будь ласка, увійдіть спочатку');
   }
-  const questions = loadQuestions();
-  let score = 0;
-  const totalPoints = questions.reduce((sum, q) => sum + q.Points, 0);
-  const answers = req.session.answers || {};
+  try {
+    const questions = loadQuestions();
+    let score = 0;
+    const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
+    const answers = req.session.answers || {};
 
-  questions.forEach((q, index) => {
-    const userAnswer = answers[index];
-    if (q.Type === 'multiple' && userAnswer) {
-      const correctAnswers = q.CorrectAnswer.split('|');
-      if (userAnswer.length === correctAnswers.length && userAnswer.every(val => correctAnswers.includes(val))) {
-        score += q.Points;
+    questions.forEach((q, index) => {
+      const userAnswer = answers[index];
+      if (q.type === 'multiple' && userAnswer) {
+        const correctAnswers = q.correctAnswers;
+        const userAnswersArray = Array.isArray(userAnswer) ? userAnswer : [userAnswer];
+        if (userAnswersArray.length === correctAnswers.length && 
+            userAnswersArray.every(val => correctAnswers.includes(q.options[val]))) {
+          score += q.points;
+        }
+      } else if (q.type === 'input' && userAnswer) {
+        if (typeof userAnswer === 'string' && 
+            userAnswer.trim().toLowerCase() === q.correctAnswers[0].toLowerCase()) {
+          score += q.points;
+        }
       }
-    } else if (q.Type === 'input' && userAnswer) {
-      if (userAnswer.trim().toLowerCase() === q.CorrectAnswer.toLowerCase()) {
-        score += q.Points;
-      }
-    }
-  });
-  res.json({ score, totalPoints });
-});
-
-app.post('/login', (req, res) => {
-  const { username, password } = req.body;
-  if (username === 'test' && password === 'password') {
-    req.session.loggedIn = true;
-    res.redirect('/test.html');
-  } else {
-    res.send('Неправильні дані!');
+    });
+    res.json({ score, totalPoints });
+  } catch (error) {
+    console.error('Ошибка при подсчёте результатов:', error.message);
+    res.status(500).send('Помилка при підрахунку результатів');
   }
 });
 
-app.get('/test.html', (req, res) => {
-  if (req.session.loggedIn) {
-    res.sendFile(path.join(__dirname, 'public', 'test.html'));
-  } else {
-    res.redirect('/login.html');
-  }
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Сервер запущен на порту ${PORT}`);
 });
-
-app.listen(3000, () => console.log('Server running on port 3000'));
