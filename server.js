@@ -1,17 +1,25 @@
 const express = require('express');
 const session = require('express-session');
+const RedisStore = require('connect-redis')(session);
+const redis = require('redis');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const app = express();
+
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379' // Замените на ваш Redis URL
+});
+redisClient.connect().catch(console.error);
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
+  store: new RedisStore({ client: redisClient }),
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: true,
-  cookie: { secure: false }
+  cookie: { secure: false } // Для HTTPS на Vercel: secure: true
 }));
 app.use((req, res, next) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -22,7 +30,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ message: 'Welcome to the Quiz API! Use /login to authenticate.' });
+  res.json({ message: 'Welcome to Alphatest API! Use /login, /questions, /answer, /result.' });
 });
 
 const loadQuestions = async () => {
