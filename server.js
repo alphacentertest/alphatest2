@@ -11,27 +11,33 @@ app.use(session({
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: true,
-  cookie: { secure: false } // Для Vercel в production нужен HTTPS и secure: true
+  cookie: { secure: false }
 }));
 app.use((req, res, next) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.header('Access-Control-Allow-Origin', '*'); // Для тестов, в production лучше ограничить
+  res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
   console.log('Session:', req.session);
   next();
 });
 
+app.get('/', (req, res) => {
+  res.json({ message: 'Welcome to the Quiz API! Use /login to authenticate.' });
+});
+
 const loadQuestions = async () => {
   try {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile('questions.xlsx');
+    await workbook.xlsx.readFile('questions.xlsx').catch(err => {
+      throw new Error(`Не удалось прочитать questions.xlsx: ${err.message}`);
+    });
     const sheet = workbook.getWorksheet('Questions');
     if (!sheet) throw new Error('Лист "Questions" не найден');
 
     const jsonData = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber > 1) { // Пропускаем заголовок
-        const rowValues = row.values.slice(1); // Убираем первый пустой элемент
+      if (rowNumber > 1) {
+        const rowValues = row.values.slice(1);
         jsonData.push({
           question: rowValues[0],
           options: rowValues.slice(1, 7).filter(Boolean),
@@ -41,16 +47,22 @@ const loadQuestions = async () => {
         });
       }
     });
+    if (jsonData.length === 0) throw new Error('Нет данных в листе Questions');
     return jsonData;
   } catch (error) {
-    console.error('Ошибка при загрузке questions.xlsx:', error.message);
-    throw new Error('Не удалось загрузить вопросы');
+    console.error('Ошибка в loadQuestions:', error.message);
+    throw error;
   }
 };
 
 app.post('/login', (req, res) => {
-  req.session.loggedIn = true;
-  res.json({ success: true });
+  try {
+    req.session.loggedIn = true;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка в /login:', error.message);
+    res.status(500).json({ error: 'Ошибка авторизации' });
+  }
 });
 
 app.get('/questions', async (req, res) => {
@@ -61,7 +73,8 @@ app.get('/questions', async (req, res) => {
     const questions = await loadQuestions();
     res.json(questions);
   } catch (error) {
-    res.status(500).send('Помилка сервера при завантаженні питань');
+    console.error('Ошибка в /questions:', error.message);
+    res.status(500).json({ error: 'Помилка сервера при завантаженні питань' });
   }
 });
 
@@ -69,10 +82,18 @@ app.post('/answer', (req, res) => {
   if (!req.session.loggedIn) {
     return res.status(403).send('Не авторизовано');
   }
-  if (!req.session.answers) req.session.answers = {};
-  const { index, answer } = req.body;
-  req.session.answers[index] = answer;
-  res.json({ success: true });
+  try {
+    if (!req.session.answers) req.session.answers = {};
+    const { index, answer } = req.body;
+    if (index === undefined || answer === undefined) {
+      throw new Error('Некорректные данные в запросе');
+    }
+    req.session.answers[index] = answer;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка в /answer:', error.message);
+    res.status(500).json({ error: 'Ошибка при сохранении ответа' });
+  }
 });
 
 app.get('/result', async (req, res) => {
@@ -103,8 +124,8 @@ app.get('/result', async (req, res) => {
     });
     res.json({ score, totalPoints });
   } catch (error) {
-    console.error('Ошибка при подсчёте результатов:', error.message);
-    res.status(500).send('Помилка при підрахунку результатів');
+    console.error('Ошибка в /result:', error.message);
+    res.status(500).json({ error: 'Помилка при підрахунку результатів' });
   }
 });
 
