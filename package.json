@@ -10,10 +10,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
-    "test-with-password": "file:",
-    "xlsx": "^0.18.5"
+    "test-with-password": "file:"
   },
   "description": "A simple Express server with session support",
   "repository": {
