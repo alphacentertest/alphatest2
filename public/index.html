@@ -1,11 +1,40 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="uk">
 <head>
   <meta charset="UTF-8">
-  <title>Quiz API</title>
+  <title>Вхід у тест</title>
 </head>
 <body>
-  <h1>Welcome to the Quiz API</h1>
-  <p>Use <code>/login</code>, <code>/questions</code>, <code>/answer</code>, and <code>/result</code> endpoints.</p>
+  <h1>Вхід у тест</h1>
+  <form id="loginForm">
+    <label for="password">Пароль:</label>
+    <input type="password" id="password" name="password" required>
+    <button type="submit">Увійти</button>
+  </form>
+  <p id="error" style="color: red;"></p>
+
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('password').value;
+
+      try {
+        const response = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+          window.location.href = '/questions';
+        } else {
+          document.getElementById('error').textContent = 'Невірний пароль';
+        }
+      } catch (error) {
+        document.getElementById('error').textContent = 'Помилка сервера';
+      }
+    });
+  </script>
 </body>
 </html>

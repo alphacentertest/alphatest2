@@ -14,7 +14,6 @@ app.use(session({
   cookie: { secure: false }
 }));
 app.use((req, res, next) => {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
   console.log('Session:', req.session);
@@ -22,7 +21,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ message: 'Welcome to Alphatest2 API! Use /login, /questions, /answer, /result.' });
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const loadQuestions = async () => {
@@ -56,9 +55,15 @@ const loadQuestions = async () => {
 };
 
 app.post('/login', (req, res) => {
+  const { password } = req.body;
+  const correctPassword = 'test123'; // Установите ваш пароль
   try {
-    req.session.loggedIn = true;
-    res.json({ success: true });
+    if (password === correctPassword) {
+      req.session.loggedIn = true;
+      res.json({ success: true });
+    } else {
+      res.status(401).json({ success: false, message: 'Невірний пароль' });
+    }
   } catch (error) {
     console.error('Ошибка в /login:', error.message);
     res.status(500).json({ error: 'Ошибка авторизации' });
@@ -66,6 +71,9 @@ app.post('/login', (req, res) => {
 });
 
 app.get('/questions', async (req, res) => {
+  if (!req.session.loggedIn) {
+    return res.status(403).send('Будь ласка, увійдіть спочатку');
+  }
   try {
     const questions = await loadQuestions();
     res.json(questions);
@@ -76,6 +84,9 @@ app.get('/questions', async (req, res) => {
 });
 
 app.post('/answer', (req, res) => {
+  if (!req.session.loggedIn) {
+    return res.status(403).send('Не авторизовано');
+  }
   try {
     if (!req.session.answers) req.session.answers = {};
     const { index, answer } = req.body;
@@ -91,6 +102,9 @@ app.post('/answer', (req, res) => {
 });
 
 app.get('/result', async (req, res) => {
+  if (!req.session.loggedIn) {
+    return res.status(403).send('Будь ласка, увійдіть спочатку');
+  }
   try {
     const questions = await loadQuestions();
     let score = 0;
