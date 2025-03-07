@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Тест</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <h1>Тест</h1>
+  <form id="quizForm">
+    <div id="questions"></div>
+    <button type="submit">Надіслати відповіді</button>
+  </form>
+  <div id="result"></div>
+  <script>
+    fetch('/questions')
+      .then(response => {
+        if (!response.ok) throw new Error('Not logged in');
+        return response.json();
+      })
+      .then(questions => {
+        const container = document.getElementById('questions');
+        questions.forEach((q, index) => {
+          const div = document.createElement('div');
+          if (q.Type === 'multiple') {
+            div.innerHTML = `
+              <p>${index + 1}. ${q.Question} (${q.Points} балів)</p>
+              <label><input type="checkbox" name="q${index}" value="${q.Option1}"> ${q.Option1}</label><br>
+              <label><input type="checkbox" name="q${index}" value="${q.Option2}"> ${q.Option2}</label><br>
+              <label><input type="checkbox" name="q${index}" value="${q.Option3}"> ${q.Option3}</label><br>
+              <label><input type="checkbox" name="q${index}" value="${q.Option4}"> ${q.Option4}</label><br>
+            `;
+          } else if (q.Type === 'input') {
+            div.innerHTML = `
+              <p>${index + 1}. ${q.Question} (${q.Points} балів)</p>
+              <input type="text" name="q${index}" placeholder="Ваша відповідь">
+            `;
+          }
+          container.appendChild(div);
+        });
+      })
+      .catch(err => {
+        document.body.innerHTML = 'Будь ласка, увійдіть спочатку. <a href="/login.html">Вхід</a>';
+      });
+
+    document.getElementById('quizForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      fetch('/questions')
+        .then(response => response.json())
+        .then(questions => {
+          let score = 0;
+          const totalPoints = questions.reduce((sum, q) => sum + q.Points, 0);
+          questions.forEach((q, index) => {
+            if (q.Type === 'multiple') {
+              const selected = Array.from(document.querySelectorAll(`input[name="q${index}"]:checked`)).map(input => input.value);
+              const correctAnswers = q.CorrectAnswer.split('|');
+              if (selected.length === correctAnswers.length && selected.every(val => correctAnswers.includes(val))) {
+                score += q.Points;
+              }
+            } else if (q.Type === 'input') {
+              const input = document.querySelector(`input[name="q${index}"]`);
+              if (input && input.value.trim().toLowerCase() === q.CorrectAnswer.toLowerCase()) {
+                score += q.Points;
+              }
+            }
+          });
+          document.getElementById('result').innerText = `Ваш результат: ${score} з ${totalPoints} балів`;
+        });
+    });
+  </script>
+</body>
+</html>
