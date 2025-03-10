@@ -32,39 +32,18 @@ app.post('/login', (req, res) => {
     req.session.user = user;
     req.session.results = req.session.results || [];
     req.session.answers = req.session.answers || {};
-    console.log('Login successful, session:', req.session); // Отладка
+    console.log('Login successful, session ID:', req.sessionID, 'session:', req.session);
     res.json({ success: true });
   } else {
     res.status(401).json({ success: false, message: 'Невірний пароль' });
   }
 });
 
-const loadQuestions = async () => {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(path.join(__dirname, 'questions.xlsx'));
-  const sheet = workbook.getWorksheet('Questions');
-  const jsonData = [];
-  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber > 1) {
-      const rowValues = row.values.slice(1);
-      jsonData.push({
-        question: rowValues[0],
-        options: rowValues.slice(1, 7).filter(Boolean),
-        correctAnswers: rowValues.slice(7, 10).filter(Boolean),
-        type: rowValues[10],
-        points: rowValues[11] || 0
-      });
-    }
-  });
-  return jsonData;
-};
-
 app.get('/questions', async (req, res) => {
-  console.log('GET /questions, session:', req.session); // Отладка
-  // Временно убираем проверку для теста
-  // if (!req.session.loggedIn) {
-  //   return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
-  // }
+  console.log('GET /questions, session ID:', req.sessionID, 'session:', req.session);
+  if (!req.session.loggedIn) {
+    return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
+  }
   try {
     const questions = await loadQuestions();
     res.json(questions);
@@ -74,10 +53,10 @@ app.get('/questions', async (req, res) => {
 });
 
 app.post('/answer', (req, res) => {
-  console.log('POST /answer, session:', req.session, 'body:', req.body); // Отладка
-  // if (!req.session.loggedIn) {
-  //   return res.status(403).json({ error: 'Не авторизовано' });
-  // }
+  console.log('POST /answer, session ID:', req.sessionID, 'session:', req.session, 'body:', req.body);
+  if (!req.session.loggedIn) {
+    return res.status(403).json({ error: 'Не авторизовано' });
+  }
   try {
     if (!req.session.answers) req.session.answers = {};
     const { index, answer } = req.body;
@@ -92,7 +71,7 @@ app.post('/answer', (req, res) => {
 });
 
 app.get('/result', async (req, res) => {
-  console.log('GET /result, session:', req.session);
+  console.log('GET /result, session ID:', req.sessionID, 'session:', req.session);
   if (!req.session.loggedIn) {
     return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
   }
@@ -128,7 +107,7 @@ app.get('/result', async (req, res) => {
     };
     req.session.results = req.session.results || [];
     req.session.results.push(resultData);
-    console.log('Saved result:', resultData); // Отладка
+    console.log('Saved result:', resultData);
 
     res.json({ score, totalPoints });
   } catch (error) {
