@@ -30,7 +30,7 @@ app.post('/login', (req, res) => {
   if (user) {
     req.session.loggedIn = true;
     req.session.user = user;
-    req.session.results = req.session.results || []; // Инициализация результатов
+    req.session.results = req.session.results || [];
     res.json({ success: true });
   } else {
     res.status(401).json({ success: false, message: 'Невірний пароль' });
@@ -59,15 +59,19 @@ const loadQuestions = async () => {
 
 app.get('/questions', async (req, res) => {
   if (!req.session.loggedIn) {
-    return res.status(403).send('Будь ласка, увійдіть спочатку');
+    return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
   }
-  const questions = await loadQuestions();
-  res.json(questions);
+  try {
+    const questions = await loadQuestions();
+    res.json(questions);
+  } catch (error) {
+    res.status(500).json({ error: 'Помилка при завантаженні питань', details: error.message });
+  }
 });
 
 app.post('/answer', (req, res) => {
   if (!req.session.loggedIn) {
-    return res.status(403).send('Не авторизовано');
+    return res.status(403).json({ error: 'Не авторизовано' });
   }
   try {
     if (!req.session.answers) req.session.answers = {};
@@ -84,7 +88,7 @@ app.post('/answer', (req, res) => {
 
 app.get('/result', async (req, res) => {
   if (!req.session.loggedIn) {
-    return res.status(403).send('Будь ласка, увійдіть спочатку');
+    return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
   }
   try {
     const questions = await loadQuestions();
@@ -116,10 +120,9 @@ app.get('/result', async (req, res) => {
       answers,
       timestamp: new Date().toISOString()
     };
-    req.session.results.push(resultData); // Сохранение в сессии
+    req.session.results.push(resultData);
     res.json({ score, totalPoints });
   } catch (error) {
-    console.error('Ошибка в /result:', error.message);
     res.status(500).json({ error: 'Помилка при підрахунку результатів', details: error.message });
   }
 });
@@ -127,14 +130,10 @@ app.get('/result', async (req, res) => {
 app.get('/results', (req, res) => {
   const adminPassword = 'admin123';
   if (req.query.admin !== adminPassword) {
-    return res.status(403).send('Доступ заборонено');
+    return res.status(403).json({ error: 'Доступ заборонено' });
   }
   try {
-    const allResults = [];
-    // Здесь можно собрать результаты из всех сессий, но для простоты пока берём из текущей
-    if (req.session.results) {
-      allResults.push(...req.session.results);
-    }
+    const allResults = req.session.results || [];
     res.json(allResults);
   } catch (error) {
     res.status(500).json({ error: 'Помилка при завантаженні результатів', details: error.message });

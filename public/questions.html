@@ -27,34 +27,29 @@
     let questions = [];
     let currentIndex = 0;
 
-    // Загрузка вопросов с сервера
     async function loadQuestions() {
       try {
         const response = await fetch('/questions');
-        if (!response.ok) throw new Error('Не вдалося завантажити питання');
-        questions = await response.json();
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не вдалося завантажити питання');
+        questions = data;
         showQuestion(currentIndex);
       } catch (error) {
         document.getElementById('questionContainer').innerHTML = `Помилка: ${error.message}`;
       }
     }
 
-    // Отображение текущего вопроса
     function showQuestion(index) {
       const q = questions[index];
       const container = document.getElementById('questionContainer');
       container.innerHTML = '';
 
-      // Номер вопроса
       container.innerHTML += `<p>Питання ${index + 1} із ${questions.length}</p>`;
-
-      // Текст вопроса
       const questionText = q.question.richText ? 
         q.question.richText.map(rt => `<span style="font-weight: ${rt.font.bold ? 'bold' : 'normal'}; font-style: ${rt.font.italic ? 'italic' : 'normal'}">${rt.text}</span>`).join('') : 
         q.question;
       container.innerHTML += `<h2>${questionText}</h2>`;
 
-      // Варианты ответа
       if (q.type === 'multiple') {
         q.options.forEach((option, i) => {
           const checked = q.userAnswer === option ? 'checked' : '';
@@ -68,12 +63,10 @@
         container.innerHTML += `<input type="text" id="answerInput" value="${q.userAnswer || ''}" placeholder="Введіть відповідь">`;
       }
 
-      // Обновление кнопок
       document.getElementById('prevBtn').disabled = index === 0;
       document.getElementById('nextBtn').disabled = index === questions.length - 1;
     }
 
-    // Сохранение ответа
     function saveAnswer() {
       const q = questions[currentIndex];
       if (q.type === 'multiple') {
@@ -84,14 +77,12 @@
       }
     }
 
-    // Навигация: Назад
     document.getElementById('prevBtn').addEventListener('click', () => {
       saveAnswer();
       currentIndex--;
       showQuestion(currentIndex);
     });
 
-    // Навигация: Вперед
     document.getElementById('nextBtn').addEventListener('click', () => {
       saveAnswer();
       currentIndex++;
@@ -100,21 +91,23 @@
       }
     });
 
-    // Завершение теста
     document.getElementById('finishBtn').addEventListener('click', async () => {
       saveAnswer();
       try {
         for (let i = 0; i < questions.length; i++) {
           if (questions[i].userAnswer) {
-            await fetch('/answer', {
+            const response = await fetch('/answer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ index: i, answer: questions[i].userAnswer })
             });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Помилка при збереженні відповіді');
           }
         }
         const response = await fetch('/result');
         const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Помилка при отриманні результатів');
         document.getElementById('questionContainer').innerHTML = 
           `Тест завершено! Ваш результат: ${result.score} із ${result.totalPoints}`;
         document.querySelector('.buttons').style.display = 'none';
@@ -123,7 +116,6 @@
       }
     });
 
-    // Старт теста
     loadQuestions();
   </script>
 </body>
