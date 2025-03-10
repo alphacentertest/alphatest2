@@ -135,7 +135,7 @@ app.get('/result', async (req, res) => {
         const correctAnswers = q.correctAnswers;
         const userAnswersArray = Array.isArray(userAnswer) ? userAnswer : [userAnswer];
         if (userAnswersArray.length === correctAnswers.length && 
-            userAnswersArray.every(val => correctAnswers.includes(q.options[val]))) {
+            userAnswersArray.every(val => correctAnswers.includes(val))) {
           score += q.points;
         }
       } else if (q.type === 'input' && userAnswer) {

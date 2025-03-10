@@ -17,13 +17,14 @@
   <div class="buttons">
     <button id="prevBtn" disabled>Назад</button>
     <button id="nextBtn">Вперед</button>
+    <button id="finishBtn">Завершити тест</button>
   </div>
 
   <script>
     let questions = [];
     let currentIndex = 0;
 
-    // Загрузка вопросов с сервера
+    // Загрузка вопросов
     async function loadQuestions() {
       try {
         const response = await fetch('/questions');
@@ -35,32 +36,30 @@
       }
     }
 
-    // Отображение текущего вопроса
+    // Отображение вопроса
     function showQuestion(index) {
       const q = questions[index];
       const container = document.getElementById('questionContainer');
       container.innerHTML = '';
 
-      // Вопрос
       const questionText = q.question.richText ? 
         q.question.richText.map(rt => `<span style="font-weight: ${rt.font.bold ? 'bold' : 'normal'}; font-style: ${rt.font.italic ? 'italic' : 'normal'}">${rt.text}</span>`).join('') : 
         q.question;
       container.innerHTML += `<h2>${questionText}</h2>`;
 
-      // Варианты ответа
       if (q.type === 'multiple') {
         q.options.forEach((option, i) => {
+          const checked = q.userAnswer === option ? 'checked' : '';
           container.innerHTML += `
             <div class="options">
-              <input type="radio" name="answer" id="opt${i}" value="${option}">
+              <input type="radio" name="answer" id="opt${i}" value="${option}" ${checked}>
               <label for="opt${i}">${option}</label>
             </div>`;
         });
       } else if (q.type === 'input') {
-        container.innerHTML += `<input type="text" id="answerInput" placeholder="Введіть відповідь">`;
+        container.innerHTML += `<input type="text" id="answerInput" value="${q.userAnswer || ''}" placeholder="Введіть відповідь">`;
       }
 
-      // Обновление кнопок
       document.getElementById('prevBtn').disabled = index === 0;
       document.getElementById('nextBtn').disabled = index === questions.length - 1;
     }
@@ -88,13 +87,12 @@
       currentIndex++;
       if (currentIndex < questions.length) {
         showQuestion(currentIndex);
-      } else {
-        finishQuiz();
       }
     });
 
     // Завершение теста
-    async function finishQuiz() {
+    document.getElementById('finishBtn').addEventListener('click', async () => {
+      saveAnswer(); // Сохраняем последний ответ
       try {
         for (let i = 0; i < questions.length; i++) {
           if (questions[i].userAnswer) {
@@ -113,9 +111,9 @@
       } catch (error) {
         alert('Помилка при збереженні результатів: ' + error.message);
       }
-    }
+    });
 
-    // Старт теста
+    // Старт
     loadQuestions();
   </script>
 </body>
