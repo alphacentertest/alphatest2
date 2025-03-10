@@ -1,23 +1,38 @@
 const express = require('express');
 const session = require('express-session');
+const RedisStore = require('connect-redis')(session);
+const redis = require('redis');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const app = express();
 
+// Настройка Redis клиента
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL // Будет браться из Vercel
+});
+redisClient.connect().catch(err => console.error('Redis connect error:', err));
+
+// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
+  store: new RedisStore({ client: redisClient }),
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: true,
-  cookie: { secure: false }
+  cookie: { secure: false } // Для HTTPS установите secure: true
 }));
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-  console.log('Session:', req.session);
-  next();
+
+// Тестовый маршрут для проверки Redis
+app.get('/test-redis', async (req, res) => {
+  try {
+    await redisClient.set('testKey', 'Redis works!');
+    const value = await redisClient.get('testKey');
+    res.json({ success: true, value });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 app.get('/', (req, res) => {
@@ -56,17 +71,13 @@ const loadQuestions = async () => {
 
 app.post('/login', (req, res) => {
   const { password } = req.body;
-  const correctPassword = 'test123'; // Установите ваш пароль
-  try {
-    if (password === correctPassword) {
-      req.session.loggedIn = true;
-      res.json({ success: true });
-    } else {
-      res.status(401).json({ success: false, message: 'Невірний пароль' });
-    }
-  } catch (error) {
-    console.error('Ошибка в /login:', error.message);
-    res.status(500).json({ error: 'Ошибка авторизации' });
+  const correctPassword = 'test123';
+  if (password === correctPassword) {
+    req.session.loggedIn = true;
+    console.log('Session set:', req.session); // Для отладки
+    res.json({ success: true });
+  } else {
+    res.status(401).json({ success: false, message: 'Невірний пароль' });
   }
 });
 
@@ -74,13 +85,8 @@ app.get('/questions', async (req, res) => {
   if (!req.session.loggedIn) {
     return res.status(403).send('Будь ласка, увійдіть спочатку');
   }
-  try {
-    const questions = await loadQuestions();
-    res.json(questions);
-  } catch (error) {
-    console.error('Ошибка в /questions:', error.message);
-    res.status(500).json({ error: `Помилка сервера при завантаженні питань: ${error.message}` });
-  }
+  const questions = await loadQuestions();
+  res.json(questions);
 });
 
 app.post('/answer', (req, res) => {
