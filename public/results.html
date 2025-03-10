@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Результати тестів</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+  <h1>Результати тестів</h1>
+  <input type="password" id="adminPassword" placeholder="Введіть пароль адміністратора">
+  <button onclick="loadResults()">Переглянути</button>
+  <table id="resultsTable">
+    <thead>
+      <tr>
+        <th>Користувач</th>
+        <th>Результат</th>
+        <th>Максимум</th>
+        <th>Дата</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    async function loadResults() {
+      const password = document.getElementById('adminPassword').value;
+      try {
+        const response = await fetch(`/results?admin=${password}`);
+        if (!response.ok) throw new Error('Недостатньо прав або помилка');
+        const results = await response.json();
+        const tbody = document.querySelector('#resultsTable tbody');
+        tbody.innerHTML = '';
+        results.forEach(r => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${r.user}</td>
+            <td>${r.score}</td>
+            <td>${r.totalPoints}</td>
+            <td>${new Date(r.timestamp).toLocaleString('uk')}</td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        alert('Помилка: ' + error.message);
+      }
+    }
+  </script>
+</body>
+</html>
