@@ -92,10 +92,10 @@ app.post('/answer', (req, res) => {
 });
 
 app.get('/result', async (req, res) => {
-  console.log('GET /result, session:', req.session); // Отладка
-  // if (!req.session.loggedIn) {
-  //   return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
-  // }
+  console.log('GET /result, session:', req.session);
+  if (!req.session.loggedIn) {
+    return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
+  }
   try {
     const questions = await loadQuestions();
     let score = 0;
@@ -128,6 +128,7 @@ app.get('/result', async (req, res) => {
     };
     req.session.results = req.session.results || [];
     req.session.results.push(resultData);
+    console.log('Saved result:', resultData); // Отладка
 
     res.json({ score, totalPoints });
   } catch (error) {
@@ -138,13 +139,16 @@ app.get('/result', async (req, res) => {
 
 app.get('/results', (req, res) => {
   const adminPassword = 'admin123';
+  console.log('GET /results, query:', req.query, 'session:', req.session); // Отладка
   if (req.query.admin !== adminPassword) {
     return res.status(403).json({ error: 'Доступ заборонено' });
   }
   try {
     const allResults = req.session.results || [];
+    console.log('Results to send:', allResults); // Отладка
     res.json(allResults);
   } catch (error) {
+    console.error('Ошибка в /results:', error.message);
     res.status(500).json({ error: 'Помилка при завантаженні результатів', details: error.message });
   }
 });
