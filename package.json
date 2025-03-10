@@ -10,13 +10,12 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "connect-redis": "^8.0.1",
-    "exceljs": "^4.4.0",
-    "express": "^4.21.2",
-    "express-session": "^1.18.1",
-    "redis": "^4.7.0",
-    "test-with-password": "file:"
-  },
+  "express": "^4.21.2",
+  "express-session": "^1.18.1",
+  "exceljs": "^4.4.0",
+  "redis": "^4.7.0",
+  "connect-redis": "^7.1.1"
+},
   "description": "A simple Express server with session support",
   "repository": {
     "type": "git",

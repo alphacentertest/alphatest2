@@ -1,16 +1,17 @@
 const express = require('express');
 const session = require('express-session');
-const RedisStore = require('connect-redis')(session);
-const redis = require('redis');
+const { createClient } = require('redis');
+const RedisStore = require('connect-redis').default; // Новый синтаксис
 const path = require('path');
 const ExcelJS = require('exceljs');
 const app = express();
 
-// Настройка Redis клиента
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL // Будет браться из Vercel
+// Redis клиент
+const redisClient = createClient({
+  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808'
 });
-redisClient.connect().catch(err => console.error('Redis connect error:', err));
+redisClient.on('error', (err) => console.error('Redis Client Error:', err));
+redisClient.connect().catch(err => console.error('Redis Connect Error:', err));
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
@@ -21,10 +22,10 @@ app.use(session({
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: true,
-  cookie: { secure: false } // Для HTTPS установите secure: true
+  cookie: { secure: false } // Для HTTPS: secure: true
 }));
 
-// Тестовый маршрут для проверки Redis
+// Тестовый маршрут
 app.get('/test-redis', async (req, res) => {
   try {
     await redisClient.set('testKey', 'Redis works!');
