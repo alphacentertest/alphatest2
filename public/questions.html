@@ -8,7 +8,10 @@
     .question { margin-bottom: 20px; }
     .options { margin-left: 20px; }
     .buttons { margin-top: 20px; }
-    button { padding: 10px 20px; margin: 0 10px; }
+    button { padding: 10px 20px; margin: 0 10px; cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: 0.5; }
+    h1 { text-align: center; }
+    #questionContainer { min-height: 200px; }
   </style>
 </head>
 <body>
@@ -24,7 +27,7 @@
     let questions = [];
     let currentIndex = 0;
 
-    // Загрузка вопросов
+    // Загрузка вопросов с сервера
     async function loadQuestions() {
       try {
         const response = await fetch('/questions');
@@ -36,17 +39,22 @@
       }
     }
 
-    // Отображение вопроса
+    // Отображение текущего вопроса
     function showQuestion(index) {
       const q = questions[index];
       const container = document.getElementById('questionContainer');
       container.innerHTML = '';
 
+      // Номер вопроса
+      container.innerHTML += `<p>Питання ${index + 1} із ${questions.length}</p>`;
+
+      // Текст вопроса
       const questionText = q.question.richText ? 
         q.question.richText.map(rt => `<span style="font-weight: ${rt.font.bold ? 'bold' : 'normal'}; font-style: ${rt.font.italic ? 'italic' : 'normal'}">${rt.text}</span>`).join('') : 
         q.question;
       container.innerHTML += `<h2>${questionText}</h2>`;
 
+      // Варианты ответа
       if (q.type === 'multiple') {
         q.options.forEach((option, i) => {
           const checked = q.userAnswer === option ? 'checked' : '';
@@ -60,6 +68,7 @@
         container.innerHTML += `<input type="text" id="answerInput" value="${q.userAnswer || ''}" placeholder="Введіть відповідь">`;
       }
 
+      // Обновление кнопок
       document.getElementById('prevBtn').disabled = index === 0;
       document.getElementById('nextBtn').disabled = index === questions.length - 1;
     }
@@ -71,17 +80,18 @@
         const selected = document.querySelector('input[name="answer"]:checked');
         q.userAnswer = selected ? selected.value : null;
       } else if (q.type === 'input') {
-        q.userAnswer = document.getElementById('answerInput').value;
+        q.userAnswer = document.getElementById('answerInput').value.trim();
       }
     }
 
-    // Навигация
+    // Навигация: Назад
     document.getElementById('prevBtn').addEventListener('click', () => {
       saveAnswer();
       currentIndex--;
       showQuestion(currentIndex);
     });
 
+    // Навигация: Вперед
     document.getElementById('nextBtn').addEventListener('click', () => {
       saveAnswer();
       currentIndex++;
@@ -92,7 +102,7 @@
 
     // Завершение теста
     document.getElementById('finishBtn').addEventListener('click', async () => {
-      saveAnswer(); // Сохраняем последний ответ
+      saveAnswer();
       try {
         for (let i = 0; i < questions.length; i++) {
           if (questions[i].userAnswer) {
@@ -113,7 +123,7 @@
       }
     });
 
-    // Старт
+    // Старт теста
     loadQuestions();
   </script>
 </body>
