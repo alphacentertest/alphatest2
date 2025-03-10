@@ -29,7 +29,7 @@
 
     async function loadQuestions() {
       try {
-        const response = await fetch('/questions');
+        const response = await fetch('/questions', { credentials: 'include' });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Не вдалося завантажити питання');
         questions = data;
@@ -99,19 +99,17 @@
             const response = await fetch('/answer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ index: i, answer: questions[i].userAnswer })
+              body: JSON.stringify({ index: i, answer: questions[i].userAnswer }),
+              credentials: 'include' // Добавляем куки
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Помилка при збереженні відповіді');
           }
         }
-        const response = await fetch('/result');
+        const response = await fetch('/result', { credentials: 'include' });
         const result = await response.json();
         console.log('Result from server:', result); // Отладка
         if (!response.ok) throw new Error(result.error || 'Помилка при отриманні результатів');
-        if (typeof result.score === 'undefined' || typeof result.totalPoints === 'undefined') {
-          throw new Error('Некоректні дані від сервера');
-        }
         document.getElementById('questionContainer').innerHTML = 
           `Тест завершено! Ваш результат: ${result.score} із ${result.totalPoints}`;
         document.querySelector('.buttons').style.display = 'none';

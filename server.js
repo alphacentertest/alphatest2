@@ -1,8 +1,17 @@
 const express = require('express');
 const session = require('express-session');
+const RedisStore = require('connect-redis').default;
+const { createClient } = require('redis');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const app = express();
+
+const redisClient = createClient({
+  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808'
+});
+redisClient.on('error', err => console.error('Redis Error:', err));
+redisClient.on('connect', () => console.log('Redis Connected')); // Отладка
+redisClient.connect().catch(err => console.error('Redis Connect Error:', err));
 
 const validPasswords = {
   'user1': 'pass123',
@@ -14,6 +23,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
+  store: new RedisStore({ client: redisClient }),
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: false,
@@ -38,6 +48,26 @@ app.post('/login', (req, res) => {
     res.status(401).json({ success: false, message: 'Невірний пароль' });
   }
 });
+
+const loadQuestions = async () => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(path.join(__dirname, 'questions.xlsx'));
+  const sheet = workbook.getWorksheet('Questions');
+  const jsonData = [];
+  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber > 1) {
+      const rowValues = row.values.slice(1);
+      jsonData.push({
+        question: rowValues[0],
+        options: rowValues.slice(1, 7).filter(Boolean),
+        correctAnswers: rowValues.slice(7, 10).filter(Boolean),
+        type: rowValues[10],
+        points: rowValues[11] || 0
+      });
+    }
+  });
+  return jsonData;
+};
 
 app.get('/questions', async (req, res) => {
   console.log('GET /questions, session ID:', req.sessionID, 'session:', req.session);
@@ -116,15 +146,15 @@ app.get('/result', async (req, res) => {
   }
 });
 
-app.get('/results', (req, res) => {
+app.get('/results', async (req, res) => {
   const adminPassword = 'admin123';
-  console.log('GET /results, query:', req.query, 'session:', req.session); // Отладка
+  console.log('GET /results, session ID:', req.sessionID, 'query:', req.query);
   if (req.query.admin !== adminPassword) {
     return res.status(403).json({ error: 'Доступ заборонено' });
   }
   try {
     const allResults = req.session.results || [];
-    console.log('Results to send:', allResults); // Отладка
+    console.log('Results to send:', allResults);
     res.json(allResults);
   } catch (error) {
     console.error('Ошибка в /results:', error.message);
