@@ -2,15 +2,12 @@ const express = require('express');
 const session = require('express-session');
 const path = require('path');
 const ExcelJS = require('exceljs');
-const fs = require('fs').promises; // Для работы с файлами
 const app = express();
 
-// Список паролей (вы отправляете их пользователям)
 const validPasswords = {
   'user1': 'pass123',
   'user2': 'pass456',
   'user3': 'pass789'
-  // Добавляйте сюда новые пароли для каждого пользователя
 };
 
 app.use(express.urlencoded({ extended: true }));
@@ -23,25 +20,23 @@ app.use(session({
   cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
 }));
 
-// Главная страница
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Авторизация
 app.post('/login', (req, res) => {
   const { password } = req.body;
   const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
   if (user) {
     req.session.loggedIn = true;
-    req.session.user = user; // Сохраняем идентификатор пользователя
+    req.session.user = user;
+    req.session.results = req.session.results || []; // Инициализация результатов
     res.json({ success: true });
   } else {
     res.status(401).json({ success: false, message: 'Невірний пароль' });
   }
 });
 
-// Загрузка вопросов
 const loadQuestions = async () => {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(path.join(__dirname, 'questions.xlsx'));
@@ -70,7 +65,6 @@ app.get('/questions', async (req, res) => {
   res.json(questions);
 });
 
-// Сохранение ответа
 app.post('/answer', (req, res) => {
   if (!req.session.loggedIn) {
     return res.status(403).send('Не авторизовано');
@@ -78,14 +72,16 @@ app.post('/answer', (req, res) => {
   try {
     if (!req.session.answers) req.session.answers = {};
     const { index, answer } = req.body;
+    if (index === undefined || answer === undefined) {
+      throw new Error('Некорректные данные');
+    }
     req.session.answers[index] = answer;
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Ошибка при сохранении ответа' });
+    res.status(500).json({ error: 'Ошибка при сохранении ответа', details: error.message });
   }
 });
 
-// Результат и сохранение
 app.get('/result', async (req, res) => {
   if (!req.session.loggedIn) {
     return res.status(403).send('Будь ласка, увійдіть спочатку');
@@ -113,7 +109,6 @@ app.get('/result', async (req, res) => {
       }
     });
 
-    // Сохранение результата в файл
     const resultData = {
       user: req.session.user,
       score,
@@ -121,38 +116,28 @@ app.get('/result', async (req, res) => {
       answers,
       timestamp: new Date().toISOString()
     };
-    const resultsFile = path.join(__dirname, 'results.json');
-    let results = [];
-    try {
-      const data = await fs.readFile(resultsFile, 'utf8');
-      results = JSON.parse(data);
-    } catch (err) {
-      // Если файла нет, создаём новый массив
-    }
-    results.push(resultData);
-    await fs.writeFile(resultsFile, JSON.stringify(results, null, 2));
-
+    req.session.results.push(resultData); // Сохранение в сессии
     res.json({ score, totalPoints });
   } catch (error) {
     console.error('Ошибка в /result:', error.message);
-    res.status(500).json({ error: 'Помилка при підрахунку результатів' });
+    res.status(500).json({ error: 'Помилка при підрахунку результатів', details: error.message });
   }
 });
 
-// Просмотр результатов (доступ только для вас)
-app.get('/results', async (req, res) => {
-  // Добавьте проверку для администратора (например, пароль или IP)
-  const adminPassword = 'admin123'; // Замените на свой пароль
+app.get('/results', (req, res) => {
+  const adminPassword = 'admin123';
   if (req.query.admin !== adminPassword) {
     return res.status(403).send('Доступ заборонено');
   }
   try {
-    const resultsFile = path.join(__dirname, 'results.json');
-    const data = await fs.readFile(resultsFile, 'utf8');
-    const results = JSON.parse(data);
-    res.json(results);
+    const allResults = [];
+    // Здесь можно собрать результаты из всех сессий, но для простоты пока берём из текущей
+    if (req.session.results) {
+      allResults.push(...req.session.results);
+    }
+    res.json(allResults);
   } catch (error) {
-    res.status(500).json({ error: 'Помилка при завантаженні результатів' });
+    res.status(500).json({ error: 'Помилка при завантаженні результатів', details: error.message });
   }
 });
 
