@@ -1,32 +1,43 @@
 const express = require('express');
 const session = require('express-session');
+const RedisStore = require('connect-redis').default;
 const { createClient } = require('redis');
-const RedisStore = require('connect-redis').default; // Новый синтаксис
 const path = require('path');
 const ExcelJS = require('exceljs');
 const app = express();
 
 // Redis клиент
-const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808'
-});
-redisClient.on('error', (err) => console.error('Redis Client Error:', err));
-redisClient.connect().catch(err => console.error('Redis Connect Error:', err));
+let redisClient;
+let sessionStore;
+try {
+  redisClient = createClient({
+    url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808'
+  });
+  redisClient.on('error', (err) => console.error('Redis Client Error:', err));
+  redisClient.connect().catch(err => console.error('Redis Connect Error:', err));
+  sessionStore = new RedisStore({ client: redisClient });
+} catch (err) {
+  console.error('Failed to initialize Redis:', err);
+  sessionStore = null; // Fallback на память
+}
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
-  store: new RedisStore({ client: redisClient }),
+  store: sessionStore || undefined, // Если Redis не работает, сессии в памяти
   secret: 'your-secret-key',
   resave: false,
-  saveUninitialized: true,
-  cookie: { secure: false } // Для HTTPS: secure: true
+  saveUninitialized: false,
+  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
 }));
 
 // Тестовый маршрут
 app.get('/test-redis', async (req, res) => {
+  if (!redisClient || !redisClient.isOpen) {
+    return res.json({ success: false, message: 'Redis not connected' });
+  }
   try {
     await redisClient.set('testKey', 'Redis works!');
     const value = await redisClient.get('testKey');
