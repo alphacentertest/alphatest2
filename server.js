@@ -96,6 +96,8 @@ app.get('/result', async (req, res) => {
     const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
     const answers = req.session.answers || {};
 
+    console.log('Session answers:', answers);
+
     questions.forEach((q, index) => {
       const userAnswer = answers[index];
       if (q.type === 'multiple' && userAnswer) {
@@ -121,8 +123,11 @@ app.get('/result', async (req, res) => {
       timestamp: new Date().toISOString()
     };
     req.session.results.push(resultData);
+
+    console.log('Result data:', resultData);
     res.json({ score, totalPoints });
   } catch (error) {
+    console.error('Ошибка в /result:', error.message);
     res.status(500).json({ error: 'Помилка при підрахунку результатів', details: error.message });
   }
 });
