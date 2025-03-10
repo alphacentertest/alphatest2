@@ -27,9 +27,7 @@
         const data = await response.json();
 
         if (data.success) {
-          window.location.href = '/questions';
-        } else {
-          document.getElementById('error').textContent = 'Невірний пароль';
+  window.location.href = '/questions.html';
         }
       } catch (error) {
         document.getElementById('error').textContent = 'Помилка сервера';
