@@ -10,7 +10,7 @@ const redisClient = createClient({
   url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808'
 });
 redisClient.on('error', err => console.error('Redis Error:', err));
-redisClient.on('connect', () => console.log('Redis Connected')); // Отладка
+redisClient.on('connect', () => console.log('Redis Connected'));
 redisClient.connect().catch(err => console.error('Redis Connect Error:', err));
 
 const validPasswords = {
@@ -50,23 +50,28 @@ app.post('/login', (req, res) => {
 });
 
 const loadQuestions = async () => {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(path.join(__dirname, 'questions.xlsx'));
-  const sheet = workbook.getWorksheet('Questions');
-  const jsonData = [];
-  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber > 1) {
-      const rowValues = row.values.slice(1);
-      jsonData.push({
-        question: rowValues[0],
-        options: rowValues.slice(1, 7).filter(Boolean),
-        correctAnswers: rowValues.slice(7, 10).filter(Boolean),
-        type: rowValues[10],
-        points: rowValues[11] || 0
-      });
-    }
-  });
-  return jsonData;
+  try {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(path.join(__dirname, 'questions.xlsx'));
+    const sheet = workbook.getWorksheet('Questions');
+    const jsonData = [];
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber > 1) {
+        const rowValues = row.values.slice(1);
+        jsonData.push({
+          question: rowValues[0],
+          options: rowValues.slice(1, 7).filter(Boolean),
+          correctAnswers: rowValues.slice(7, 10).filter(Boolean),
+          type: rowValues[10],
+          points: rowValues[11] || 0
+        });
+      }
+    });
+    return jsonData;
+  } catch (error) {
+    console.error('Error in loadQuestions:', error.message);
+    throw error;
+  }
 };
 
 app.get('/questions', async (req, res) => {
@@ -78,6 +83,7 @@ app.get('/questions', async (req, res) => {
     const questions = await loadQuestions();
     res.json(questions);
   } catch (error) {
+    console.error('Ошибка в /questions:', error.message);
     res.status(500).json({ error: 'Помилка при завантаженні питань', details: error.message });
   }
 });
