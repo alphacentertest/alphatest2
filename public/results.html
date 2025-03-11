@@ -31,7 +31,7 @@
       const password = document.getElementById('adminPassword').value;
       try {
         const response = await fetch(`/results?admin=${encodeURIComponent(password)}`, {
-          credentials: 'include' // Отправляем куки сессии
+          credentials: 'include'
         });
         const data = await response.json();
         console.log('Results response:', data);
