@@ -51,12 +51,13 @@
       container.innerHTML += `<h2>${questionText}</h2>`;
 
       if (q.type === 'multiple') {
+        container.innerHTML += '<p>(Виберіть усі правильні відповіді)</p>';
         q.options.forEach((option, i) => {
           const checked = Array.isArray(q.userAnswer) && q.userAnswer.includes(option) ? 'checked' : '';
           container.innerHTML += `
             <div class="options">
-              <input type="checkbox" name="answer" id="opt${i}" value="${option}" ${checked}>
-              <label for="opt${i}">${option}</label>
+              <input type="checkbox" name="answer${index}" id="opt${index}_${i}" value="${option}" ${checked}>
+              <label for="opt${index}_${i}">${option}</label>
             </div>`;
         });
       } else if (q.type === 'input') {
@@ -70,8 +71,9 @@
     function saveAnswer() {
       const q = questions[currentIndex];
       if (q.type === 'multiple') {
-        const selected = Array.from(document.querySelectorAll('input[name="answer"]:checked')).map(input => input.value);
+        const selected = Array.from(document.querySelectorAll(`input[name="answer${currentIndex}"]:checked`)).map(input => input.value);
         q.userAnswer = selected.length > 0 ? selected : null;
+        console.log(`Saved answer for question ${currentIndex}:`, q.userAnswer); // Отладка
       } else if (q.type === 'input') {
         q.userAnswer = document.getElementById('answerInput').value.trim();
       }

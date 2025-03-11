@@ -121,16 +121,21 @@ app.get('/result', async (req, res) => {
       const userAnswer = answers[index];
       if (q.type === 'multiple' && userAnswer) {
         const correctAnswers = q.correctAnswers;
-        // Проверяем, что ответ пользователя — массив, и он полностью совпадает с правильными ответами
+        console.log(`Question ${index}: userAnswer:`, userAnswer, 'correctAnswers:', correctAnswers); // Отладка
+        // Проверяем полное совпадение для множественного выбора
         if (Array.isArray(userAnswer) && 
             userAnswer.length === correctAnswers.length && 
             userAnswer.every(val => correctAnswers.includes(val)) && 
             correctAnswers.every(val => userAnswer.includes(val))) {
           score += q.points;
+          console.log(`Question ${index}: scored ${q.points} points`);
+        } else {
+          console.log(`Question ${index}: no points, answers do not match`);
         }
       } else if (q.type === 'input' && userAnswer) {
         if (userAnswer.trim().toLowerCase() === q.correctAnswers[0].toLowerCase()) {
           score += q.points;
+          console.log(`Question ${index}: scored ${q.points} points`);
         }
       }
     });
