@@ -160,8 +160,12 @@ app.get('/result', async (req, res) => {
 
 app.get('/results', async (req, res) => {
   const adminPassword = 'admin123';
-  console.log('GET /results, query:', req.query);
+  console.log('GET /results, full query:', req.query);
   console.log('Admin password check - expected:', adminPassword, 'received:', req.query.admin, 'type:', typeof req.query.admin);
+  if (!req.query.admin) {
+    console.log('No admin password provided');
+    return res.status(403).json({ error: 'Пароль адміністратора не вказано' });
+  }
   if (req.query.admin !== adminPassword) {
     console.log('Access denied: incorrect admin password');
     return res.status(403).json({ error: 'Доступ заборонено' });

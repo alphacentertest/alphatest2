@@ -29,9 +29,10 @@
   <script>
     async function loadResults() {
       const password = document.getElementById('adminPassword').value.trim();
-      console.log('Sending password:', password); // Отладка
+      const url = `/results?admin=${encodeURIComponent(password)}`;
+      console.log('Request URL:', url); // Отладка полного URL
       try {
-        const response = await fetch(`/results?admin=${encodeURIComponent(password)}`, {
+        const response = await fetch(url, {
           credentials: 'include'
         });
         const data = await response.json();
