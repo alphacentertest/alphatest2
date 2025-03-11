@@ -121,10 +121,11 @@ app.get('/result', async (req, res) => {
       const userAnswer = answers[index];
       if (q.type === 'multiple' && userAnswer) {
         const correctAnswers = q.correctAnswers;
-        if (Array.isArray(userAnswer) ? 
+        // Проверяем, что ответ пользователя — массив, и он полностью совпадает с правильными ответами
+        if (Array.isArray(userAnswer) && 
+            userAnswer.length === correctAnswers.length && 
             userAnswer.every(val => correctAnswers.includes(val)) && 
-            userAnswer.length === correctAnswers.length : 
-            correctAnswers.includes(userAnswer)) {
+            correctAnswers.every(val => userAnswer.includes(val))) {
           score += q.points;
         }
       } else if (q.type === 'input' && userAnswer) {

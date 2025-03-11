@@ -52,10 +52,10 @@
 
       if (q.type === 'multiple') {
         q.options.forEach((option, i) => {
-          const checked = q.userAnswer === option ? 'checked' : '';
+          const checked = Array.isArray(q.userAnswer) && q.userAnswer.includes(option) ? 'checked' : '';
           container.innerHTML += `
             <div class="options">
-              <input type="radio" name="answer" id="opt${i}" value="${option}" ${checked}>
+              <input type="checkbox" name="answer" id="opt${i}" value="${option}" ${checked}>
               <label for="opt${i}">${option}</label>
             </div>`;
         });
@@ -70,8 +70,8 @@
     function saveAnswer() {
       const q = questions[currentIndex];
       if (q.type === 'multiple') {
-        const selected = document.querySelector('input[name="answer"]:checked');
-        q.userAnswer = selected ? selected.value : null;
+        const selected = Array.from(document.querySelectorAll('input[name="answer"]:checked')).map(input => input.value);
+        q.userAnswer = selected.length > 0 ? selected : null;
       } else if (q.type === 'input') {
         q.userAnswer = document.getElementById('answerInput').value.trim();
       }
@@ -100,7 +100,7 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ index: i, answer: questions[i].userAnswer }),
-              credentials: 'include' // Добавляем куки
+              credentials: 'include'
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Помилка при збереженні відповіді');
@@ -108,7 +108,7 @@
         }
         const response = await fetch('/result', { credentials: 'include' });
         const result = await response.json();
-        console.log('Result from server:', result); // Отладка
+        console.log('Result from server:', result);
         if (!response.ok) throw new Error(result.error || 'Помилка при отриманні результатів');
         document.getElementById('questionContainer').innerHTML = 
           `Тест завершено! Ваш результат: ${result.score} із ${result.totalPoints}`;
