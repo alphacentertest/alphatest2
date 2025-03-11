@@ -1,20 +1,10 @@
 const express = require('express');
 const session = require('express-session');
-const RedisStore = require('connect-redis').default;
-const { createClient } = require('redis');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const fs = require('fs').promises;
 
 const app = express();
-
-// Redis клиент
-const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808'
-});
-redisClient.on('error', err => console.error('Redis Error:', err));
-redisClient.on('connect', () => console.log('Redis Connected'));
-redisClient.connect().catch(err => console.error('Redis Connect Error:', err));
 
 // Пароли для каждого пользователя
 const validPasswords = {
@@ -28,11 +18,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
-  store: new RedisStore({ client: redisClient }),
   secret: 'your-secret-key',
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 } // Secure в продакшене
+  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
 }));
 
 // Главная страница (логин)
@@ -44,17 +33,16 @@ app.get('/', (req, res) => {
 app.post('/login', async (req, res) => {
   try {
     const { password } = req.body;
+    console.log('Login attempt:', { password });
     if (!password) return res.status(400).json({ success: false, message: 'Пароль не вказано' });
     const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
     if (!user) return res.status(401).json({ success: false, message: 'Невірний пароль' });
 
-    await redisClient.ping();
     req.session.loggedIn = true;
     req.session.user = user;
     req.session.results = req.session.results || [];
     req.session.answers = req.session.answers || {};
-    await req.session.save();
-    console.log('Login successful:', req.sessionID, 'User:', user);
+    console.log('Session after login:', req.session);
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /login:', error.stack);
@@ -64,6 +52,7 @@ app.post('/login', async (req, res) => {
 
 // Страница выбора теста
 app.get('/select-test', (req, res) => {
+  console.log('Accessing /select-test, session:', req.session);
   if (!req.session.loggedIn) {
     return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
   }
@@ -71,8 +60,8 @@ app.get('/select-test', (req, res) => {
     <html>
       <body>
         <h1>Виберіть тест</h1>
-        <button onclick="window.location.href='/questions?test=1'">Почати Тест 1</button>
-        <button onclick="window.location.href='/questions?test=2'">Почати Тест 2</button>
+        <button onclick="window.location.href='/test?test=1'">Почати Тест 1</button>
+        <button onclick="window.location.href='/test?test=2'">Почати Тест 2</button>
       </body>
     </html>
   `);
@@ -112,10 +101,10 @@ const loadQuestions = async (testNumber) => {
   }
 };
 
-// Маршрут для вопросов
-app.get('/questions', async (req, res) => {
+// Маршрут для теста
+app.get('/test', async (req, res) => {
   if (!req.session.loggedIn) {
-    return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
+    return res.status(403).send('Будь ласка, увійдіть спочатку');
   }
   const testNumber = req.query.test === '2' ? 2 : 1;
   req.session.currentTest = testNumber;
@@ -130,11 +119,56 @@ app.get('/questions', async (req, res) => {
       }
       return q;
     });
-    console.log(`Sending questions for test ${testNumber}:`, enhancedQuestions);
-    res.json(enhancedQuestions);
+
+    let html = `
+      <html>
+        <body>
+          <h1>Тест ${testNumber}</h1>
+          <form id="testForm">
+    `;
+    enhancedQuestions.forEach((q, index) => {
+      html += `<div>
+        <p>${index + 1}. ${q.question}</p>`;
+      if (q.image) {
+        html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;"><br>`;
+      }
+      q.options.forEach((option, optIndex) => {
+        html += `
+          <input type="radio" name="q${index}" value="${option}" id="q${index}_${optIndex}">
+          <label for="q${index}_${optIndex}">${option}</label><br>
+        `;
+      });
+      html += `</div><br>`;
+    });
+    html += `
+          <button type="button" onclick="submitAnswers()">Відправити відповіді</button>
+          </form>
+          <script>
+            async function submitAnswers() {
+              const form = document.getElementById('testForm');
+              const answers = {};
+              ${enhancedQuestions.map((_, i) => `
+                const selected = form.querySelector('input[name="q${i}"]:checked');
+                if (selected) answers[${i}] = [selected.value];
+              `).join('')}
+              await fetch('/answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ answers })
+              });
+              const response = await fetch('/result');
+              const data = await response.json();
+              alert('Ваш результат: ' + data.score + ' з ' + data.totalPoints);
+              window.location.href = '/results';
+            }
+          </script>
+        </body>
+      </html>
+    `;
+    res.send(html);
   } catch (error) {
-    console.error('Ошибка в /questions:', error.stack);
-    res.status(500).json({ error: 'Помилка при завантаженні питань', details: error.message });
+    console.error('Ошибка в /test:', error.stack);
+    res.status(500).send('Помилка при завантаженні тесту');
   }
 });
 
@@ -143,9 +177,10 @@ app.post('/answer', (req, res) => {
   if (!req.session.loggedIn) return res.status(403).json({ error: 'Не авторизовано' });
   try {
     if (!req.session.answers) req.session.answers = {};
-    const { index, answer } = req.body;
-    if (index === undefined || answer === undefined) throw new Error('Некорректные данные');
-    req.session.answers[index] = answer;
+    const { answers } = req.body;
+    Object.keys(answers).forEach(index => {
+      req.session.answers[index] = answers[index];
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /answer:', error.stack);
@@ -186,10 +221,8 @@ app.get('/result', async (req, res) => {
       answers, 
       timestamp: new Date().toISOString() 
     };
-    const resultsKey = 'test_results';
-    let results = await redisClient.get(resultsKey) ? JSON.parse(await redisClient.get(resultsKey)) : [];
-    results.push(resultData);
-    await redisClient.set(resultsKey, JSON.stringify(results));
+    req.session.results = req.session.results || [];
+    req.session.results.push(resultData);
     console.log('Saved result:', resultData);
     res.json({ score, totalPoints });
   } catch (error) {
@@ -204,16 +237,13 @@ app.get('/results', async (req, res) => {
     return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
   }
   const adminPassword = 'admin123';
-  
   try {
-    const resultsKey = 'test_results';
-    const allResults = await redisClient.get(resultsKey) ? JSON.parse(await redisClient.get(resultsKey)) : [];
-
+    const allResults = req.session.results || [];
     if (req.query.admin === adminPassword) {
-      res.json(allResults); // Админ видит все результаты
+      res.json(allResults);
     } else {
       const userResults = allResults.filter(result => result.user === req.session.user);
-      res.json(userResults); // Пользователь видит только свои результаты
+      res.json(userResults);
     }
   } catch (error) {
     console.error('Ошибка в /results:', error.stack);
@@ -224,12 +254,8 @@ app.get('/results', async (req, res) => {
 // Экспорт для Vercel
 module.exports = app;
 
-// Локальный запуск (для тестирования)
+// Локальный запуск
 if (require.main === module) {
-  process.on('SIGINT', () => {
-    console.log('Shutting down server...');
-    process.exit(0);
-  });
   const port = process.env.PORT || 3000;
   app.listen(port, () => {
     console.log(`Server running on port ${port}`);
