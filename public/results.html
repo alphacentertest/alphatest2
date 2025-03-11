@@ -30,10 +30,12 @@
     async function loadResults() {
       const password = document.getElementById('adminPassword').value;
       try {
-        const response = await fetch(`/results?admin=${encodeURIComponent(password)}`);
+        const response = await fetch(`/results?admin=${encodeURIComponent(password)}`, {
+          credentials: 'include' // Отправляем куки сессии
+        });
         const data = await response.json();
-        console.log('Results response:', data); // Отладка
-        if (!response.ok) throw new Error(data.error || 'Недостатньо прав або помилка');
+        console.log('Results response:', data);
+        if (!response.ok) throw new Error(data.error || `Помилка сервера: ${response.status}`);
         const tbody = document.querySelector('#resultsTable tbody');
         tbody.innerHTML = '';
         data.forEach(r => {
@@ -47,7 +49,7 @@
           tbody.appendChild(row);
         });
       } catch (error) {
-        console.error('Fetch error:', error); // Отладка
+        console.error('Fetch error:', error);
         alert('Помилка: ' + error.message);
       }
     }

@@ -143,7 +143,8 @@ app.get('/result', async (req, res) => {
     };
     req.session.results = req.session.results || [];
     req.session.results.push(resultData);
-    console.log('Saved result:', resultData);
+    console.log('Saved result in session:', resultData);
+    await req.session.save(); // Явное сохранение сессии
 
     res.json({ score, totalPoints });
   } catch (error) {
@@ -154,13 +155,17 @@ app.get('/result', async (req, res) => {
 
 app.get('/results', async (req, res) => {
   const adminPassword = 'admin123';
-  console.log('GET /results, session ID:', req.sessionID, 'query:', req.query);
+  console.log('GET /results, session ID:', req.sessionID, 'query:', req.query, 'session:', req.session);
   if (req.query.admin !== adminPassword) {
+    console.log('Admin password incorrect, expected:', adminPassword, 'got:', req.query.admin);
     return res.status(403).json({ error: 'Доступ заборонено' });
   }
   try {
     const allResults = req.session.results || [];
     console.log('Results to send:', allResults);
+    if (allResults.length === 0) {
+      console.log('No results found in session');
+    }
     res.json(allResults);
   } catch (error) {
     console.error('Ошибка в /results:', error.message);
