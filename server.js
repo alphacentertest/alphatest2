@@ -37,25 +37,37 @@ app.get('/', (req, res) => {
 
 app.post('/login', async (req, res) => {
   try {
-    console.log('POST /login, body:', req.body); // Отладка
+    console.log('POST /login, body:', req.body);
     const { password } = req.body;
     if (!password) {
       console.log('No password provided');
       return res.status(400).json({ success: false, message: 'Пароль не вказано' });
     }
     const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
-    if (user) {
-      req.session.loggedIn = true;
-      req.session.user = user;
-      req.session.results = req.session.results || [];
-      req.session.answers = req.session.answers || {};
-      await req.session.save(); // Явное сохранение сессии
-      console.log('Login successful, session ID:', req.sessionID, 'session:', req.session);
-      res.json({ success: true });
-    } else {
+    if (!user) {
       console.log('Invalid password:', password);
-      res.status(401).json({ success: false, message: 'Невірний пароль' });
+      return res.status(401).json({ success: false, message: 'Невірний пароль' });
     }
+
+    // Проверяем подключение к Redis перед сохранением сессии
+    await redisClient.ping().catch(err => {
+      throw new Error('Redis unavailable: ' + err.message);
+    });
+
+    req.session.loggedIn = true;
+    req.session.user = user;
+    req.session.results = req.session.results || [];
+    req.session.answers = req.session.answers || {};
+
+    await new Promise((resolve, reject) => {
+      req.session.save(err => {
+        if (err) reject(new Error('Session save failed: ' + err.message));
+        else resolve();
+      });
+    });
+
+    console.log('Login successful, session ID:', req.sessionID, 'session:', req.session);
+    res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /login:', error.stack);
     res.status(500).json({ success: false, message: 'Помилка сервера', details: error.message });
