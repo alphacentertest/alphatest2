@@ -141,10 +141,15 @@ app.get('/result', async (req, res) => {
       answers,
       timestamp: new Date().toISOString()
     };
-    req.session.results = req.session.results || [];
-    req.session.results.push(resultData);
-    console.log('Saved result in session:', resultData);
-    await req.session.save(); // Явное сохранение сессии
+    const resultsKey = 'test_results';
+    let results = [];
+    const storedResults = await redisClient.get(resultsKey);
+    if (storedResults) {
+      results = JSON.parse(storedResults);
+    }
+    results.push(resultData);
+    await redisClient.set(resultsKey, JSON.stringify(results));
+    console.log('Saved result in Redis:', resultData);
 
     res.json({ score, totalPoints });
   } catch (error) {
@@ -155,17 +160,15 @@ app.get('/result', async (req, res) => {
 
 app.get('/results', async (req, res) => {
   const adminPassword = 'admin123';
-  console.log('GET /results, session ID:', req.sessionID, 'query:', req.query, 'session:', req.session);
+  console.log('GET /results, query:', req.query);
   if (req.query.admin !== adminPassword) {
-    console.log('Admin password incorrect, expected:', adminPassword, 'got:', req.query.admin);
     return res.status(403).json({ error: 'Доступ заборонено' });
   }
   try {
-    const allResults = req.session.results || [];
-    console.log('Results to send:', allResults);
-    if (allResults.length === 0) {
-      console.log('No results found in session');
-    }
+    const resultsKey = 'test_results';
+    const storedResults = await redisClient.get(resultsKey);
+    const allResults = storedResults ? JSON.parse(storedResults) : [];
+    console.log('Results from Redis:', allResults);
     res.json(allResults);
   } catch (error) {
     console.error('Ошибка в /results:', error.message);
