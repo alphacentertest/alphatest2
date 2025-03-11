@@ -1,39 +1,31 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html>
 <head>
-  <meta charset="UTF-8">
   <title>Вхід</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
-    input, button { padding: 10px; margin: 5px; }
-  </style>
 </head>
 <body>
-  <h1>Вхід у тест</h1>
-  <input type="password" id="password" placeholder="Введіть пароль">
+  <h1>Вхід у систему</h1>
+  <label for="password">Введіть код користувача:</label>
+  <input type="password" id="password" placeholder="Код">
   <button onclick="login()">Увійти</button>
-  <p id="error" style="color: red;"></p>
 
   <script>
     async function login() {
-      const password = document.getElementById('password').value.trim();
+      const password = document.getElementById('password').value;
       try {
         const response = await fetch('/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
-          credentials: 'include'
+          body: JSON.stringify({ password })
         });
         const data = await response.json();
-        console.log('Login response:', data); // Отладка
-        if (response.ok && data.success) {
-          window.location.href = '/questions.html';
+        if (data.success) {
+          window.location.href = '/select-test'; // Должно быть здесь
         } else {
-          document.getElementById('error').textContent = data.message || 'Помилка сервера';
+          alert(data.message || 'Невірний пароль');
         }
       } catch (error) {
-        console.error('Fetch error:', error);
-        document.getElementById('error').textContent = 'Помилка з’єднання';
+        alert('Помилка сервера: ' + error.message);
       }
     }
   </script>
