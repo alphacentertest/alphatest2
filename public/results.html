@@ -12,7 +12,7 @@
 </head>
 <body>
   <h1>Результати тестів</h1>
-  <input type="password" id="adminPassword" placeholder="Введіть пароль адміністратора">
+  <input type="password" id="adminPassword" placeholder="Введіть пароль адміністратора" value="admin123">
   <button onclick="loadResults()">Переглянути</button>
   <table id="resultsTable">
     <thead>
@@ -28,7 +28,8 @@
 
   <script>
     async function loadResults() {
-      const password = document.getElementById('adminPassword').value;
+      const password = document.getElementById('adminPassword').value.trim();
+      console.log('Sending password:', password); // Отладка
       try {
         const response = await fetch(`/results?admin=${encodeURIComponent(password)}`, {
           credentials: 'include'

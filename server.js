@@ -161,17 +161,17 @@ app.get('/result', async (req, res) => {
 app.get('/results', async (req, res) => {
   const adminPassword = 'admin123';
   console.log('GET /results, query:', req.query);
+  console.log('Admin password check - expected:', adminPassword, 'received:', req.query.admin, 'type:', typeof req.query.admin);
   if (req.query.admin !== adminPassword) {
-    console.log('Admin password incorrect, expected:', adminPassword, 'got:', req.query.admin);
+    console.log('Access denied: incorrect admin password');
     return res.status(403).json({ error: 'Доступ заборонено' });
   }
   try {
-    // Тестовые данные
-    const testResults = [
-      { user: 'test_user', score: 22, totalPoints: 45, timestamp: new Date().toISOString() }
-    ];
-    console.log('Sending test results:', testResults);
-    res.json(testResults);
+    const resultsKey = 'test_results';
+    const storedResults = await redisClient.get(resultsKey);
+    const allResults = storedResults ? JSON.parse(storedResults) : [];
+    console.log('Results from Redis:', allResults);
+    res.json(allResults);
   } catch (error) {
     console.error('Ошибка в /results:', error.message);
     res.status(500).json({ error: 'Помилка при завантаженні результатів', details: error.message });
