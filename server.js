@@ -1,40 +1,3 @@
-Ошибка:
-
-text
-
-Свернуть
-
-Перенос
-
-Копировать
-Помилка при збереженні результатів: Помилка при підрахунку результатів
-при нажатии на кнопку "Завершити тест" указывает на проблему в маршруте /result в server.js. Кроме того, рисунки не отображаются, что может быть связано с их извлечением или отображением. Давайте разберём и исправим обе проблемы.
-
-Проблема 1: Ошибка при завершении теста
-Диагностика
-Сообщение об ошибке возникает в блоке try-catch в questions.html при вызове /result. Это значит, что сервер вернул ошибку (например, 500), и её детали можно найти в логах Vercel. Вероятные причины:
-
-Проблема в loadQuestions() — например, при извлечении изображений.
-Ошибка в логике подсчёта баллов в /result.
-Исправление
-Добавим больше отладки в server.js: Откройте server.js:
-powershell
-
-Свернуть
-
-Перенос
-
-Копировать
-cd C:\Users\roman\Программирование\test-with-password\alphatest2
-notepad server.js
-Обновите код с улучшенной обработкой ошибок:
-javascript
-
-Свернуть
-
-Перенос
-
-Копировать
 const express = require('express');
 const session = require('express-session');
 const RedisStore = require('connect-redis').default;
@@ -72,18 +35,30 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.post('/login', (req, res) => {
-  const { password } = req.body;
-  const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
-  if (user) {
-    req.session.loggedIn = true;
-    req.session.user = user;
-    req.session.results = req.session.results || [];
-    req.session.answers = req.session.answers || {};
-    console.log('Login successful, session ID:', req.sessionID);
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ success: false, message: 'Невірний пароль' });
+app.post('/login', async (req, res) => {
+  try {
+    console.log('POST /login, body:', req.body); // Отладка
+    const { password } = req.body;
+    if (!password) {
+      console.log('No password provided');
+      return res.status(400).json({ success: false, message: 'Пароль не вказано' });
+    }
+    const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
+    if (user) {
+      req.session.loggedIn = true;
+      req.session.user = user;
+      req.session.results = req.session.results || [];
+      req.session.answers = req.session.answers || {};
+      await req.session.save(); // Явное сохранение сессии
+      console.log('Login successful, session ID:', req.sessionID, 'session:', req.session);
+      res.json({ success: true });
+    } else {
+      console.log('Invalid password:', password);
+      res.status(401).json({ success: false, message: 'Невірний пароль' });
+    }
+  } catch (error) {
+    console.error('Ошибка в /login:', error.stack);
+    res.status(500).json({ success: false, message: 'Помилка сервера', details: error.message });
   }
 });
 

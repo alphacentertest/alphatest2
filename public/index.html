@@ -2,37 +2,40 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8">
-  <title>Вхід у тест</title>
+  <title>Вхід</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
+    input, button { padding: 10px; margin: 5px; }
+  </style>
 </head>
 <body>
   <h1>Вхід у тест</h1>
-  <form id="loginForm">
-    <label for="password">Пароль:</label>
-    <input type="password" id="password" name="password" required>
-    <button type="submit">Увійти</button>
-  </form>
+  <input type="password" id="password" placeholder="Введіть пароль">
+  <button onclick="login()">Увійти</button>
   <p id="error" style="color: red;"></p>
 
   <script>
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const password = document.getElementById('password').value;
-
+    async function login() {
+      const password = document.getElementById('password').value.trim();
       try {
         const response = await fetch('/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password })
+          body: JSON.stringify({ password }),
+          credentials: 'include'
         });
         const data = await response.json();
-
-        if (data.success) {
-  window.location.href = '/questions.html';
+        console.log('Login response:', data); // Отладка
+        if (response.ok && data.success) {
+          window.location.href = '/questions.html';
+        } else {
+          document.getElementById('error').textContent = data.message || 'Помилка сервера';
         }
       } catch (error) {
-        document.getElementById('error').textContent = 'Помилка сервера';
+        console.error('Fetch error:', error);
+        document.getElementById('error').textContent = 'Помилка з’єднання';
       }
-    });
+    }
   </script>
 </body>
 </html>
