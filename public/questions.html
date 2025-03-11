@@ -12,6 +12,7 @@
     button:disabled { cursor: not-allowed; opacity: 0.5; }
     h1 { text-align: center; }
     #questionContainer { min-height: 200px; }
+    img { max-width: 100%; height: auto; margin: 10px 0; }
   </style>
 </head>
 <body>
@@ -50,6 +51,11 @@
         q.question;
       container.innerHTML += `<h2>${questionText}</h2>`;
 
+      // Добавляем изображение, если есть
+      if (q.image) {
+        container.innerHTML += `<img src="${q.image}" alt="Рисунок">`;
+      }
+
       if (q.type === 'multiple') {
         container.innerHTML += '<p>(Виберіть усі правильні відповіді)</p>';
         q.options.forEach((option, i) => {
@@ -73,7 +79,7 @@
       if (q.type === 'multiple') {
         const selected = Array.from(document.querySelectorAll(`input[name="answer${currentIndex}"]:checked`)).map(input => input.value);
         q.userAnswer = selected.length > 0 ? selected : null;
-        console.log(`Saved answer for question ${currentIndex}:`, q.userAnswer); // Отладка
+        console.log(`Question ${currentIndex} saved answer:`, q.userAnswer);
       } else if (q.type === 'input') {
         q.userAnswer = document.getElementById('answerInput').value.trim();
       }
