@@ -1,10 +1,47 @@
+Ошибка:
+
+text
+
+Свернуть
+
+Перенос
+
+Копировать
+Помилка при збереженні результатів: Помилка при підрахунку результатів
+при нажатии на кнопку "Завершити тест" указывает на проблему в маршруте /result в server.js. Кроме того, рисунки не отображаются, что может быть связано с их извлечением или отображением. Давайте разберём и исправим обе проблемы.
+
+Проблема 1: Ошибка при завершении теста
+Диагностика
+Сообщение об ошибке возникает в блоке try-catch в questions.html при вызове /result. Это значит, что сервер вернул ошибку (например, 500), и её детали можно найти в логах Vercel. Вероятные причины:
+
+Проблема в loadQuestions() — например, при извлечении изображений.
+Ошибка в логике подсчёта баллов в /result.
+Исправление
+Добавим больше отладки в server.js: Откройте server.js:
+powershell
+
+Свернуть
+
+Перенос
+
+Копировать
+cd C:\Users\roman\Программирование\test-with-password\alphatest2
+notepad server.js
+Обновите код с улучшенной обработкой ошибок:
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
 const express = require('express');
 const session = require('express-session');
 const RedisStore = require('connect-redis').default;
 const { createClient } = require('redis');
 const path = require('path');
 const ExcelJS = require('exceljs');
-const fs = require('fs').promises; // Для работы с файлами
+const fs = require('fs').promises;
 const app = express();
 
 const redisClient = createClient({
@@ -50,47 +87,57 @@ app.post('/login', (req, res) => {
   }
 });
 
-// Функция для извлечения вопросов и изображений
 const loadQuestions = async () => {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(path.join(__dirname, 'questions.xlsx'));
-  const jsonData = [];
-  const sheet = workbook.getWorksheet('Questions');
+  try {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(path.join(__dirname, 'questions.xlsx'));
+    const jsonData = [];
+    const sheet = workbook.getWorksheet('Questions');
 
-  // Создаём папку для изображений, если её нет
-  const imagesDir = path.join(__dirname, 'public', 'images');
-  await fs.mkdir(imagesDir, { recursive: true });
+    if (!sheet) throw new Error('Лист "Questions" не знайдено в questions.xlsx');
 
-  // Обрабатываем вопросы
-  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber > 1) {
-      const rowValues = row.values.slice(1);
-      jsonData.push({
-        question: rowValues[0],
-        options: rowValues.slice(1, 7).filter(Boolean),
-        correctAnswers: rowValues.slice(7, 10).filter(Boolean),
-        type: rowValues[10],
-        points: rowValues[11] || 0
-      });
-    }
-  });
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber > 1) {
+        const rowValues = row.values.slice(1);
+        jsonData.push({
+          question: rowValues[0] || '',
+          options: rowValues.slice(1, 7).filter(Boolean),
+          correctAnswers: rowValues.slice(7, 10).filter(Boolean),
+          type: rowValues[10] || 'multiple',
+          points: Number(rowValues[11]) || 0
+        });
+      }
+    });
 
-  // Извлекаем изображения
-  for (let i = 1; i <= 10; i++) { // Предполагаем до 10 рисунков, можно увеличить
-    const pictureSheet = workbook.getWorksheet(`Picture ${i}`);
-    if (pictureSheet) {
-      pictureSheet.getImages().forEach(async (imageRef) => {
-        const image = workbook.model.media.find(m => m.index === imageRef.imageId);
-        if (image) {
-          const imagePath = path.join(imagesDir, `picture${i}.${image.extension}`);
-          await fs.writeFile(imagePath, Buffer.from(image.buffer));
-          console.log(`Saved image: ${imagePath}`);
+    const imagesDir = path.join(__dirname, 'public', 'images');
+    await fs.mkdir(imagesDir, { recursive: true });
+
+    for (let i = 1; i <= 10; i++) {
+      const pictureSheet = workbook.getWorksheet(`Picture ${i}`);
+      if (pictureSheet) {
+        const images = pictureSheet.getImages();
+        if (images.length > 0) {
+          for (const imageRef of images) {
+            const image = workbook.model.media.find(m => m.index === imageRef.imageId);
+            if (image && image.buffer) {
+              const imagePath = path.join(imagesDir, `picture${i}.${image.extension || 'png'}`);
+              await fs.writeFile(imagePath, Buffer.from(image.buffer));
+              console.log(`Saved image: ${imagePath}`);
+            } else {
+              console.log(`No valid image buffer for Picture ${i}`);
+            }
+          }
+        } else {
+          console.log(`No images found in Picture ${i}`);
         }
-      });
+      }
     }
-  }
 
-  return jsonData;
+    return jsonData;
+  } catch (error) {
+    console.error('Error in loadQuestions:', error.stack);
+    throw error;
+  }
 };
 
 app.get('/questions', async (req, res) => {
@@ -99,18 +146,17 @@ app.get('/questions', async (req, res) => {
   }
   try {
     const questions = await loadQuestions();
-    // Добавляем ссылку на изображение в вопросы
     const enhancedQuestions = questions.map((q, index) => {
       const match = q.question.match(/Рисунок (\d+)/i);
       if (match) {
         const pictureNum = match[1];
-        q.image = `/images/picture${pictureNum}.png`; // Предполагаем PNG, можно изменить
+        q.image = `/images/picture${pictureNum}.png`;
       }
       return q;
     });
     res.json(enhancedQuestions);
   } catch (error) {
-    console.error('Ошибка в /questions:', error.message);
+    console.error('Ошибка в /questions:', error.stack);
     res.status(500).json({ error: 'Помилка при завантаженні питань', details: error.message });
   }
 });
@@ -153,10 +199,13 @@ app.get('/result', async (req, res) => {
             correctAnswers.every(val => userAnswer.includes(String(val)))) {
           score += q.points;
           console.log(`Question ${index}: scored ${q.points} points`);
+        } else {
+          console.log(`Question ${index}: no points, answers do not fully match`);
         }
       } else if (q.type === 'input' && userAnswer) {
-        if (userAnswer.trim().toLowerCase() === q.correctAnswers[0].toLowerCase()) {
+        if (typeof userAnswer === 'string' && userAnswer.trim().toLowerCase() === q.correctAnswers[0].toLowerCase()) {
           score += q.points;
+          console.log(`Question ${index}: scored ${q.points} points`);
         }
       }
     });
@@ -180,7 +229,7 @@ app.get('/result', async (req, res) => {
 
     res.json({ score, totalPoints });
   } catch (error) {
-    console.error('Ошибка в /result:', error.message);
+    console.error('Ошибка в /result:', error.stack);
     res.status(500).json({ error: 'Помилка при підрахунку результатів', details: error.message });
   }
 });
@@ -199,7 +248,7 @@ app.get('/results', async (req, res) => {
     const allResults = storedResults ? JSON.parse(storedResults) : [];
     res.json(allResults);
   } catch (error) {
-    console.error('Ошибка в /results:', error.message);
+    console.error('Ошибка в /results:', error.stack);
     res.status(500).json({ error: 'Помилка при завантаженні результатів', details: error.message });
   }
 });
