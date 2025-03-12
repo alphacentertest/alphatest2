@@ -1,3 +1,136 @@
+Спасибо за подробности! Проблемы ясны:
+
+Картинки не отображаются, и появляется "No image available" даже там, где они должны быть.
+Ошибка Quirks Mode из-за отсутствия <!DOCTYPE html>.
+Ошибка Unexpected token '<', "<html>..." is not valid JSON при попытке открыть результаты, связанная с неверным маршрутом или файлом results.html.
+Давайте исправим все шаг за шагом.
+
+Проблема 1: Картинки не отображаются
+Сообщение "No image available" появляется, когда q.image не определено или пусто, хотя по ссылке https://alphatest2-irt8la4vk-alphas-projects-0550256e.vercel.app/images/Picture%201.png картинка доступна. Проблема в логике обработки q.image.
+
+Диагностика
+Текущий код:
+
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+const pictureMatch = q.question.match(/^Picture (\d+)/i);
+if (pictureMatch) {
+  const pictureNum = pictureMatch[1];
+  q.image = `/images/Picture ${pictureNum}.png`;
+}
+Если q.question не начинается с "Picture X" (например, просто текст вопроса), q.image остается undefined, и срабатывает else { html += '<p>No image available</p>'; }.
+Исправление
+Проверка логов: Добавим отладку, чтобы убедиться, что q.image устанавливается:
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+const enhancedQuestions = questions.map((q) => {
+  const pictureMatch = q.question.match(/^Picture (\d+)/i);
+  if (pictureMatch) {
+    const pictureNum = pictureMatch[1];
+    q.image = `/images/Picture ${pictureNum}.png`;
+    console.log(`Assigned image for question: ${q.question} -> ${q.image}`);
+  } else {
+    console.log(`No image for question: ${q.question}`);
+  }
+  return q;
+});
+Убедимся, что вопросы содержат "Picture X":
+Откройте questions1.xlsx и questions2.xlsx.
+Проверьте, что в столбце с вопросами (первый столбец) есть строки вроде "Picture 1 Какой цвет?".
+Если картинки привязаны к другому столбцу или их имена отличаются, нужно скорректировать логику.
+Исправим рендеринг: Уберем "No image available" и сделаем картинки необязательными:
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+if (q.image) {
+  html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;" onerror="console.log('Image failed to load: ${q.image}')"><br>`;
+}
+Проблема 2: Quirks Mode
+Ошибка Quirks Mode возникает из-за отсутствия <!DOCTYPE html> в HTML. Это влияет на рендеринг, но не на функциональность картинок напрямую.
+
+Исправление
+Добавим <!DOCTYPE html> в /test/question и другие маршруты:
+
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+let html = `
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Тест ${testNumber}</title>
+    </head>
+    <body>
+      <h1>Тест ${testNumber}</h1>
+      <div>
+        <p>${index + 1}. ${q.question}</p>
+`;
+Проблема 3: Ошибка на /results.html
+Ошибка Unexpected token '<', "<html>..." is not valid JSON говорит, что вы пытаетесь загрузить данные с /results.html, но в коде нет такого маршрута — есть только /results, который возвращает HTML. Кажется, у вас есть локальный файл results.html, который ожидает JSON, но обращается не туда.
+
+Диагностика
+Вы открываете https://alphatest2.vercel.app/results.html, но сервер возвращает HTML вместо JSON.
+В server.js есть маршрут /results, который рендерит страницу результатов.
+Исправление
+Удалим ожидание JSON: Если у вас есть results.html в public/, он не нужен, так как /results уже рендерит результаты. Удалите его:
+bash
+
+Свернуть
+
+Перенос
+
+Копировать
+git rm public/results.html
+Обновим кнопку на /result: В /result добавим переход на /results (уже есть), а в /results оставим просмотр:
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+const resultHtml = `
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Результати Тесту ${testNumber}</title>
+    </head>
+    <body>
+      <h1>Результати Тесту ${testNumber}</h1>
+      <p>Ваш результат: ${score} з ${totalPoints}</p>
+      <button onclick="window.location.href='/results'">Переглянути результати</button>
+      <button onclick="window.location.href='/'">Повернутися на головну</button>
+    </body>
+  </html>
+`;
+Полный обновленный server.js
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const path = require('path');
@@ -52,7 +185,12 @@ const checkAuth = (req, res, next) => {
 
 app.get('/select-test', checkAuth, (req, res) => {
   res.send(`
+    <!DOCTYPE html>
     <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Вибір тесту</title>
+      </head>
       <body>
         <h1>Виберіть тест</h1>
         <button onclick="window.location.href='/test?test=1'">Почати Тест 1</button>
@@ -102,6 +240,9 @@ app.get('/test', checkAuth, async (req, res) => {
       if (pictureMatch) {
         const pictureNum = pictureMatch[1];
         q.image = `/images/Picture ${pictureNum}.png`;
+        console.log(`Assigned image for question: ${q.question} -> ${q.image}`);
+      } else {
+        console.log(`No image for question: ${q.question}`);
       }
       return q;
     });
@@ -124,7 +265,7 @@ app.get('/test/question', checkAuth, (req, res) => {
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).send('Тест не розпочато');
 
-  const { questions, currentQuestion, testNumber } = userTest;
+  const { questions, testNumber } = userTest;
   const index = parseInt(req.query.index) || 0;
 
   if (index < 0 || index >= questions.length) {
@@ -135,7 +276,12 @@ app.get('/test/question', checkAuth, (req, res) => {
   const q = questions[index];
   console.log('Rendering question:', { index, image: q.image });
   let html = `
+    <!DOCTYPE html>
     <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Тест ${testNumber}</title>
+      </head>
       <body>
         <h1>Тест ${testNumber}</h1>
         <div>
@@ -143,8 +289,6 @@ app.get('/test/question', checkAuth, (req, res) => {
   `;
   if (q.image) {
     html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;" onerror="console.log('Image failed to load: ${q.image}')"><br>`;
-  } else {
-    html += '<p>No image available</p>';
   }
   q.options.forEach((option, optIndex) => {
     const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
@@ -221,7 +365,12 @@ app.get('/result', checkAuth, async (req, res) => {
   });
 
   const resultHtml = `
+    <!DOCTYPE html>
     <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Результати Тесту ${testNumber}</title>
+      </head>
       <body>
         <h1>Результати Тесту ${testNumber}</h1>
         <p>Ваш результат: ${score} з ${totalPoints}</p>
@@ -236,7 +385,12 @@ app.get('/result', checkAuth, async (req, res) => {
 app.get('/results', checkAuth, async (req, res) => {
   const userTest = userTests.get(req.user);
   let resultsHtml = `
+    <!DOCTYPE html>
     <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Результати</title>
+      </head>
       <body>
         <h1>Результати</h1>
   `;
@@ -261,7 +415,7 @@ app.get('/results', checkAuth, async (req, res) => {
     resultsHtml += `
       <p>Тест ${testNumber}: ${score} з ${totalPoints}</p>
     `;
-    userTests.delete(req.user); // Очистка после просмотра
+    userTests.delete(req.user);
   } else {
     resultsHtml += '<p>Немає завершених тестів</p>';
   }
