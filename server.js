@@ -356,11 +356,15 @@ app.get('/results', checkAuth, async (req, res) => {
 app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
   try {
     if (!redisClient.isOpen) {
+      console.log('Redis not connected, attempting to reconnect...');
       await redisClient.connect();
       console.log('Reconnected to Redis in /admin/results');
+    } else {
+      console.log('Redis already connected');
     }
     const results = await redisClient.lRange('test_results', 0, -1);
     console.log('Fetched results from Redis:', results);
+
     let adminHtml = `
       <!DOCTYPE html>
       <html>
@@ -388,6 +392,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
     `;
     if (!results || results.length === 0) {
       adminHtml += '<tr><td colspan="7">Немає результатів</td></tr>';
+      console.log('No results found in test_results');
     } else {
       results.forEach((result, index) => {
         try {
@@ -418,7 +423,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
     res.send(adminHtml);
   } catch (error) {
     console.error('Ошибка в /admin/results:', error.stack);
-    res.status(500).send('Помилка при завантаженні результатів');
+    res.status(500).send(`Помилка при завантаженні результатів: ${error.message}`);
   }
 });
 
