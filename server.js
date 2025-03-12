@@ -190,7 +190,7 @@ app.get('/test/question', checkAuth, (req, res) => {
 
   userTest.currentQuestion = index;
   const q = questions[index];
-  console.log('Rendering question:', { index, picture: q.picture, text: q.text });
+  console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
   let html = `
     <!DOCTYPE html>
     <html>
@@ -208,13 +208,22 @@ app.get('/test/question', checkAuth, (req, res) => {
   html += `
           <p>${index + 1}. ${q.text}</p>
   `;
-  q.options.forEach((option, optIndex) => {
-    const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
+  if (!q.options || q.options.length === 0) {
+    // Поле ввода для вопросов без вариантов
+    const userAnswer = userTest.answers[index] || '';
     html += `
-      <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
-      <label for="q${index}_${optIndex}">${option}</label><br>
+      <input type="text" name="q${index}" id="q${index}_input" value="${userAnswer}" placeholder="Введіть відповідь"><br>
     `;
-  });
+  } else {
+    // Чекбоксы для вопросов с вариантами
+    q.options.forEach((option, optIndex) => {
+      const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
+      html += `
+        <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
+        <label for="q${index}_${optIndex}">${option}</label><br>
+      `;
+    });
+  }
   html += `
         </div><br>
         <button ${index === 0 ? 'disabled' : ''} onclick="window.location.href='/test/question?index=${index - 1}'">Назад</button>
@@ -222,8 +231,13 @@ app.get('/test/question', checkAuth, (req, res) => {
         <button onclick="finishTest(${index})">Завершити тест</button>
         <script>
           async function saveAndNext(index) {
-            const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
-            const answers = Array.from(checked).map(input => input.value);
+            let answers;
+            if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
+              answers = document.getElementById('q' + index + '_input').value;
+            } else {
+              const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
+              answers = Array.from(checked).map(input => input.value);
+            }
             await fetch('/answer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -232,8 +246,13 @@ app.get('/test/question', checkAuth, (req, res) => {
             window.location.href = '/test/question?index=' + (index + 1);
           }
           async function finishTest(index) {
-            const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
-            const answers = Array.from(checked).map(input => input.value);
+            let answers;
+            if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
+              answers = document.getElementById('q' + index + '_input').value;
+            } else {
+              const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
+              answers = Array.from(checked).map(input => input.value);
+            }
             await fetch('/answer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -254,7 +273,7 @@ app.post('/answer', checkAuth, (req, res) => {
     const { index, answer } = req.body;
     const userTest = userTests.get(req.user);
     if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
-    userTest.answers[index] = answer || [];
+    userTest.answers[index] = answer; // Сохраняем как массив для чекбоксов или строку для текстового ввода
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /answer:', error.stack);
@@ -272,17 +291,46 @@ app.get('/result', checkAuth, async (req, res) => {
   const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
 
   questions.forEach((q, index) => {
-    const userAnswer = answers[index] || [];
-    if (q.type === 'multiple' && userAnswer.length > 0) {
-      const correctAnswers = q.correctAnswers.map(String);
-      const userAnswers = userAnswer.map(String);
-      if (correctAnswers.length === userAnswers.length && 
-          correctAnswers.every(val => userAnswers.includes(val)) && 
-          userAnswers.every(val => correctAnswers.includes(val))) {
+    const userAnswer = answers[index];
+    if (!q.options || q.options.length === 0) {
+      // Текстовый ввод
+      if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
         score += q.points;
+      }
+    } else {
+      // Чекбоксы
+      if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+        const correctAnswers = q.correctAnswers.map(String);
+        const userAnswers = userAnswer.map(String);
+        if (correctAnswers.length === userAnswers.length && 
+            correctAnswers.every(val => userAnswers.includes(val)) && 
+            userAnswers.every(val => correctAnswers.includes(val))) {
+          score += q.points;
+        }
       }
     }
   });
+
+  const endTime = Date.now();
+  await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime);
+
+  const resultHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Результати Тесту ${testNumber}</title>
+      </head>
+      <body>
+        <h1>Результати Тесту ${testNumber}</h1>
+        <p>Ваш результат: ${score} з ${totalPoints}</p>
+        <button onclick="window.location.href='/results'">Переглянути результати</button>
+        <button onclick="window.location.href='/'">Повернутися на головну</button>
+      </body>
+    </html>
+  `;
+  res.send(resultHtml);
+});
 
   const endTime = Date.now();
   await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime);
@@ -354,77 +402,85 @@ app.get('/results', checkAuth, async (req, res) => {
 });
 
 app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
+  let redisConnected = false;
   try {
     if (!redisClient.isOpen) {
       console.log('Redis not connected, attempting to reconnect...');
       await redisClient.connect();
       console.log('Reconnected to Redis in /admin/results');
-    } else {
-      console.log('Redis already connected');
     }
-    const results = await redisClient.lRange('test_results', 0, -1);
-    console.log('Fetched results from Redis:', results);
-
-    let adminHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Результати всіх користувачів</title>
-          <style>
-            table { border-collapse: collapse; width: 100%; }
-            th, td { border: 1px solid black; padding: 8px; text-align: left; }
-            th { background-color: #f2f2f2; }
-          </style>
-        </head>
-        <body>
-          <h1>Результати всіх користувачів</h1>
-          <table>
-            <tr>
-              <th>Користувач</th>
-              <th>Тест</th>
-              <th>Очки</th>
-              <th>Максимум</th>
-              <th>Початок</th>
-              <th>Кінець</th>
-              <th>Тривалість (сек)</th>
-            </tr>
-    `;
-    if (!results || results.length === 0) {
-      adminHtml += '<tr><td colspan="7">Немає результатів</td></tr>';
-      console.log('No results found in test_results');
-    } else {
-      results.forEach((result, index) => {
-        try {
-          const r = JSON.parse(result);
-          console.log(`Parsed result ${index}:`, r);
-          adminHtml += `
-            <tr>
-              <td>${r.user || 'N/A'}</td>
-              <td>${r.testNumber || 'N/A'}</td>
-              <td>${r.score || '0'}</td>
-              <td>${r.totalPoints || '0'}</td>
-              <td>${r.startTime || 'N/A'}</td>
-              <td>${r.endTime || 'N/A'}</td>
-              <td>${r.duration || 'N/A'}</td>
-            </tr>
-          `;
-        } catch (parseError) {
-          console.error(`Ошибка парсинга результата ${index}:`, parseError, 'Raw data:', result);
-        }
-      });
-    }
-    adminHtml += `
-          </table>
-          <button onclick="window.location.href='/'">Повернутися на головну</button>
-        </body>
-      </html>
-    `;
-    res.send(adminHtml);
-  } catch (error) {
-    console.error('Ошибка в /admin/results:', error.stack);
-    res.status(500).send(`Помилка при завантаженні результатів: ${error.message}`);
+    redisConnected = true;
+  } catch (connectError) {
+    console.error('Failed to connect to Redis:', connectError);
   }
+
+  let results = [];
+  if (redisConnected) {
+    try {
+      results = await redisClient.lRange('test_results', 0, -1);
+      console.log('Fetched results from Redis:', results);
+    } catch (fetchError) {
+      console.error('Ошибка при получении данных из Redis:', fetchError);
+    }
+  }
+
+  let adminHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Результати всіх користувачів</title>
+        <style>
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid black; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+        </style>
+      </head>
+      <body>
+        <h1>Результати всіх користувачів</h1>
+        <p>Статус Redis: ${redisConnected ? 'Підключено' : 'Немає підключення'}</p>
+        <table>
+          <tr>
+            <th>Користувач</th>
+            <th>Тест</th>
+            <th>Очки</th>
+            <th>Максимум</th>
+            <th>Початок</th>
+            <th>Кінець</th>
+            <th>Тривалість (сек)</th>
+          </tr>
+  `;
+  if (!results || results.length === 0) {
+    adminHtml += '<tr><td colspan="7">Немає результатів</td></tr>';
+    console.log('No results found in test_results');
+  } else {
+    results.forEach((result, index) => {
+      try {
+        const r = JSON.parse(result);
+        console.log(`Parsed result ${index}:`, r);
+        adminHtml += `
+          <tr>
+            <td>${r.user || 'N/A'}</td>
+            <td>${r.testNumber || 'N/A'}</td>
+            <td>${r.score || '0'}</td>
+            <td>${r.totalPoints || '0'}</td>
+            <td>${r.startTime || 'N/A'}</td>
+            <td>${r.endTime || 'N/A'}</td>
+            <td>${r.duration || 'N/A'}</td>
+          </tr>
+        `;
+      } catch (parseError) {
+        console.error(`Ошибка парсинга результата ${index}:`, parseError, 'Raw data:', result);
+      }
+    });
+  }
+  adminHtml += `
+        </table>
+        <button onclick="window.location.href='/'">Повернутися на головну</button>
+      </body>
+    </html>
+  `;
+  res.send(adminHtml);
 });
 
 module.exports = app;
