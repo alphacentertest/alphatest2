@@ -209,13 +209,11 @@ app.get('/test/question', checkAuth, (req, res) => {
           <p>${index + 1}. ${q.text}</p>
   `;
   if (!q.options || q.options.length === 0) {
-    // Поле ввода для вопросов без вариантов
     const userAnswer = userTest.answers[index] || '';
     html += `
       <input type="text" name="q${index}" id="q${index}_input" value="${userAnswer}" placeholder="Введіть відповідь"><br>
     `;
   } else {
-    // Чекбоксы для вопросов с вариантами
     q.options.forEach((option, optIndex) => {
       const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
       html += `
@@ -273,7 +271,7 @@ app.post('/answer', checkAuth, (req, res) => {
     const { index, answer } = req.body;
     const userTest = userTests.get(req.user);
     if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
-    userTest.answers[index] = answer; // Сохраняем как массив для чекбоксов или строку для текстового ввода
+    userTest.answers[index] = answer; // Сохраняем как массив или строку
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /answer:', error.stack);
@@ -293,12 +291,10 @@ app.get('/result', checkAuth, async (req, res) => {
   questions.forEach((q, index) => {
     const userAnswer = answers[index];
     if (!q.options || q.options.length === 0) {
-      // Текстовый ввод
       if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
         score += q.points;
       }
     } else {
-      // Чекбоксы
       if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
         const correctAnswers = q.correctAnswers.map(String);
         const userAnswers = userAnswer.map(String);
@@ -310,27 +306,6 @@ app.get('/result', checkAuth, async (req, res) => {
       }
     }
   });
-
-  const endTime = Date.now();
-  await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime);
-
-  const resultHtml = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Результати Тесту ${testNumber}</title>
-      </head>
-      <body>
-        <h1>Результати Тесту ${testNumber}</h1>
-        <p>Ваш результат: ${score} з ${totalPoints}</p>
-        <button onclick="window.location.href='/results'">Переглянути результати</button>
-        <button onclick="window.location.href='/'">Повернутися на головну</button>
-      </body>
-    </html>
-  `;
-  res.send(resultHtml);
-});
 
   const endTime = Date.now();
   await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime);
@@ -373,14 +348,20 @@ app.get('/results', checkAuth, async (req, res) => {
     const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
 
     questions.forEach((q, index) => {
-      const userAnswer = answers[index] || [];
-      if (q.type === 'multiple' && userAnswer.length > 0) {
-        const correctAnswers = q.correctAnswers.map(String);
-        const userAnswers = userAnswer.map(String);
-        if (correctAnswers.length === userAnswers.length && 
-            correctAnswers.every(val => userAnswers.includes(val)) && 
-            userAnswers.every(val => correctAnswers.includes(val))) {
+      const userAnswer = answers[index];
+      if (!q.options || q.options.length === 0) {
+        if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
           score += q.points;
+        }
+      } else {
+        if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+          const correctAnswers = q.correctAnswers.map(String);
+          const userAnswers = userAnswer.map(String);
+          if (correctAnswers.length === userAnswers.length && 
+              correctAnswers.every(val => userAnswers.includes(val)) && 
+              userAnswers.every(val => correctAnswers.includes(val))) {
+            score += q.points;
+          }
         }
       }
     });
