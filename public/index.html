@@ -20,7 +20,7 @@
         });
         const data = await response.json();
         if (data.success) {
-          window.location.href = '/select-test'; // Должно быть здесь
+          window.location.href = '/select-test'; // Перенаправление
         } else {
           alert(data.message || 'Невірний пароль');
         }
