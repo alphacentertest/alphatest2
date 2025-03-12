@@ -386,23 +386,35 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
   let redisConnected = false;
   try {
     if (!redisClient.isOpen) {
-      console.log('Redis not connected, attempting to reconnect...');
+      console.log('Redis not connected in /admin/results, attempting to reconnect...');
       await redisClient.connect();
       console.log('Reconnected to Redis in /admin/results');
     }
     redisConnected = true;
   } catch (connectError) {
-    console.error('Failed to connect to Redis:', connectError);
+    console.error('Failed to connect to Redis in /admin/results:', connectError);
   }
 
   let results = [];
+  let errorMessage = '';
   if (redisConnected) {
     try {
-      results = await redisClient.lRange('test_results', 0, -1);
-      console.log('Fetched results from Redis:', results);
+      const keyType = await redisClient.type('test_results');
+      console.log('Type of test_results:', keyType);
+      if (keyType !== 'list' && keyType !== 'none') {
+        errorMessage = `Неверный тип данных для test_results: ${keyType}. Ожидается list.`;
+        console.error(errorMessage);
+      } else {
+        results = await redisClient.lRange('test_results', 0, -1);
+        console.log('Fetched results from Redis:', results);
+      }
     } catch (fetchError) {
       console.error('Ошибка при получении данных из Redis:', fetchError);
+      errorMessage = `Ошибка Redis: ${fetchError.message}`;
     }
+  } else {
+    console.log('Redis not connected, skipping fetch');
+    errorMessage = 'Нет подключения к Redis';
   }
 
   let adminHtml = `
@@ -415,11 +427,17 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
           table { border-collapse: collapse; width: 100%; }
           th, td { border: 1px solid black; padding: 8px; text-align: left; }
           th { background-color: #f2f2f2; }
+          .error { color: red; }
         </style>
       </head>
       <body>
         <h1>Результати всіх користувачів</h1>
         <p>Статус Redis: ${redisConnected ? 'Підключено' : 'Немає підключення'}</p>
+  `;
+  if (errorMessage) {
+    adminHtml += `<p class="error">${errorMessage}</p>`;
+  }
+  adminHtml += `
         <table>
           <tr>
             <th>Користувач</th>
