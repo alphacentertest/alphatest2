@@ -6,25 +6,21 @@ const fs = require('fs').promises;
 
 const app = express();
 
-// Пароли
 const validPasswords = {
   'user1': 'pass123',
   'user2': 'pass456',
   'user3': 'pass789'
 };
 
-// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
 
-// Главная страница
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Логин
 app.post('/login', async (req, res) => {
   try {
     const { password } = req.body;
@@ -45,7 +41,6 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Проверка авторизации
 const checkAuth = (req, res, next) => {
   const user = req.cookies.auth;
   if (!user || !validPasswords[user]) {
@@ -55,7 +50,6 @@ const checkAuth = (req, res, next) => {
   next();
 };
 
-// Выбор теста
 app.get('/select-test', checkAuth, (req, res) => {
   res.send(`
     <html>
@@ -68,7 +62,6 @@ app.get('/select-test', checkAuth, (req, res) => {
   `);
 });
 
-// Загрузка вопросов
 const loadQuestions = async (testNumber) => {
   try {
     const workbook = new ExcelJS.Workbook();
@@ -98,10 +91,8 @@ const loadQuestions = async (testNumber) => {
   }
 };
 
-// Хранилище тестов
 const userTests = new Map();
 
-// Начало теста
 app.get('/test', checkAuth, async (req, res) => {
   const testNumber = req.query.test === '2' ? 2 : 1;
   try {
@@ -111,7 +102,6 @@ app.get('/test', checkAuth, async (req, res) => {
       if (pictureMatch) {
         const pictureNum = pictureMatch[1];
         q.image = `/images/Picture ${pictureNum}.png`;
-        q.question = q.question.replace(/^Picture \d+\s*/i, '');
       }
       return q;
     });
@@ -130,7 +120,6 @@ app.get('/test', checkAuth, async (req, res) => {
   }
 });
 
-// Отображение вопроса
 app.get('/test/question', checkAuth, (req, res) => {
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).send('Тест не розпочато');
@@ -144,6 +133,7 @@ app.get('/test/question', checkAuth, (req, res) => {
 
   userTest.currentQuestion = index;
   const q = questions[index];
+  console.log('Rendering question:', { index, image: q.image });
   let html = `
     <html>
       <body>
@@ -152,7 +142,9 @@ app.get('/test/question', checkAuth, (req, res) => {
           <p>${index + 1}. ${q.question}</p>
   `;
   if (q.image) {
-    html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;"><br>`;
+    html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;" onerror="console.log('Image failed to load: ${q.image}')"><br>`;
+  } else {
+    html += '<p>No image available</p>';
   }
   q.options.forEach((option, optIndex) => {
     const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
@@ -194,7 +186,6 @@ app.get('/test/question', checkAuth, (req, res) => {
   res.send(html);
 });
 
-// Сохранение ответа
 app.post('/answer', checkAuth, (req, res) => {
   try {
     const { index, answer } = req.body;
@@ -208,7 +199,6 @@ app.post('/answer', checkAuth, (req, res) => {
   }
 });
 
-// Результаты
 app.get('/result', checkAuth, async (req, res) => {
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
@@ -235,15 +225,55 @@ app.get('/result', checkAuth, async (req, res) => {
       <body>
         <h1>Результати Тесту ${testNumber}</h1>
         <p>Ваш результат: ${score} з ${totalPoints}</p>
+        <button onclick="window.location.href='/results'">Переглянути результати</button>
         <button onclick="window.location.href='/'">Повернутися на головну</button>
       </body>
     </html>
   `;
-  userTests.delete(req.user);
   res.send(resultHtml);
 });
 
-// Экспорт для Vercel
+app.get('/results', checkAuth, async (req, res) => {
+  const userTest = userTests.get(req.user);
+  let resultsHtml = `
+    <html>
+      <body>
+        <h1>Результати</h1>
+  `;
+  
+  if (userTest) {
+    const { questions, answers, testNumber } = userTest;
+    let score = 0;
+    const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
+
+    questions.forEach((q, index) => {
+      const userAnswer = answers[index] || [];
+      if (q.type === 'multiple' && userAnswer.length > 0) {
+        const correctAnswers = q.correctAnswers.map(String);
+        const userAnswers = userAnswer.map(String);
+        if (correctAnswers.length === userAnswers.length && 
+            correctAnswers.every(val => userAnswers.includes(val)) && 
+            userAnswers.every(val => correctAnswers.includes(val))) {
+          score += q.points;
+        }
+      }
+    });
+    resultsHtml += `
+      <p>Тест ${testNumber}: ${score} з ${totalPoints}</p>
+    `;
+    userTests.delete(req.user); // Очистка после просмотра
+  } else {
+    resultsHtml += '<p>Немає завершених тестів</p>';
+  }
+
+  resultsHtml += `
+        <button onclick="window.location.href='/'">Повернутися на головну</button>
+      </body>
+    </html>
+  `;
+  res.send(resultsHtml);
+});
+
 module.exports = app;
 
 if (require.main === module) {
