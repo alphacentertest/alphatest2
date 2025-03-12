@@ -51,7 +51,12 @@ app.post('/login', async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax'
     });
-    res.json({ success: true });
+
+    if (user === 'admin') {
+      res.json({ success: true, redirect: '/admin/results' });
+    } else {
+      res.json({ success: true, redirect: '/select-test' });
+    }
   } catch (error) {
     console.error('Ошибка в /login:', error.stack);
     res.status(500).json({ success: false, message: 'Помилка сервера' });
@@ -61,7 +66,7 @@ app.post('/login', async (req, res) => {
 const checkAuth = (req, res, next) => {
   const user = req.cookies.auth;
   if (!user || !validPasswords[user]) {
-    return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
+    return res.redirect('/');
   }
   req.user = user;
   next();
@@ -76,6 +81,7 @@ const checkAdmin = (req, res, next) => {
 };
 
 app.get('/select-test', checkAuth, (req, res) => {
+  if (req.user === 'admin') return res.redirect('/admin/results');
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -143,6 +149,7 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
 };
 
 app.get('/test', checkAuth, async (req, res) => {
+  if (req.user === 'admin') return res.redirect('/admin/results');
   const testNumber = req.query.test === '2' ? 2 : 1;
   try {
     const questions = await loadQuestions(testNumber);
@@ -151,7 +158,10 @@ app.get('/test', checkAuth, async (req, res) => {
       if (pictureMatch) {
         const pictureNum = pictureMatch[1];
         q.image = `/images/Picture ${pictureNum}.png`;
-        console.log(`Assigned image: ${q.question} -> ${q.image}`);
+        q.text = q.question.replace(/^Picture \d+\.\s*/i, '').trim(); // Убираем "Picture X" и оставляем текст
+        console.log(`Assigned image: ${q.question} -> ${q.image}, Text: ${q.text}`);
+      } else {
+        q.text = q.question; // Если нет картинки, весь текст остается
       }
       return q;
     });
@@ -172,6 +182,7 @@ app.get('/test', checkAuth, async (req, res) => {
 });
 
 app.get('/test/question', checkAuth, (req, res) => {
+  if (req.user === 'admin') return res.redirect('/admin/results');
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).send('Тест не розпочато');
 
@@ -184,7 +195,7 @@ app.get('/test/question', checkAuth, (req, res) => {
 
   userTest.currentQuestion = index;
   const q = questions[index];
-  console.log('Rendering question:', { index, image: q.image });
+  console.log('Rendering question:', { index, image: q.image, text: q.text });
   let html = `
     <!DOCTYPE html>
     <html>
@@ -195,11 +206,13 @@ app.get('/test/question', checkAuth, (req, res) => {
       <body>
         <h1>Тест ${testNumber}</h1>
         <div>
-          <p>${index + 1}. ${q.question}</p>
   `;
   if (q.image) {
-    html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;" onerror="console.log('Image failed to load: ${q.image}')"><br>`;
+    html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;" onerror="this.src='/images/placeholder.png'; console.log('Image failed to load: ${q.image}')"><br>`;
   }
+  html += `
+          <p>${index + 1}. ${q.text}</p>
+  `;
   q.options.forEach((option, optIndex) => {
     const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
     html += `
@@ -241,6 +254,7 @@ app.get('/test/question', checkAuth, (req, res) => {
 });
 
 app.post('/answer', checkAuth, (req, res) => {
+  if (req.user === 'admin') return res.redirect('/admin/results');
   try {
     const { index, answer } = req.body;
     const userTest = userTests.get(req.user);
@@ -254,6 +268,7 @@ app.post('/answer', checkAuth, (req, res) => {
 });
 
 app.get('/result', checkAuth, async (req, res) => {
+  if (req.user === 'admin') return res.redirect('/admin/results');
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
 
@@ -296,6 +311,7 @@ app.get('/result', checkAuth, async (req, res) => {
 });
 
 app.get('/results', checkAuth, async (req, res) => {
+  if (req.user === 'admin') return res.redirect('/admin/results');
   const userTest = userTests.get(req.user);
   let resultsHtml = `
     <!DOCTYPE html>
