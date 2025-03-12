@@ -98,7 +98,7 @@ const loadQuestions = async (testNumber) => {
   }
 };
 
-// Хранилище ответов и текущего теста
+// Хранилище тестов
 const userTests = new Map();
 
 // Начало теста
@@ -157,7 +157,7 @@ app.get('/test/question', checkAuth, (req, res) => {
   q.options.forEach((option, optIndex) => {
     const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
     html += `
-      <input type="radio" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
+      <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
       <label for="q${index}_${optIndex}">${option}</label><br>
     `;
   });
@@ -165,28 +165,26 @@ app.get('/test/question', checkAuth, (req, res) => {
         </div><br>
         <button ${index === 0 ? 'disabled' : ''} onclick="window.location.href='/test/question?index=${index - 1}'">Назад</button>
         <button ${index === questions.length - 1 ? 'disabled' : ''} onclick="saveAndNext(${index})">Вперед</button>
-        <button onclick="finishTest()">Завершити тест</button>
+        <button onclick="finishTest(${index})">Завершити тест</button>
         <script>
           async function saveAndNext(index) {
-            const selected = document.querySelector('input[name="q' + index + '"]:checked');
-            if (selected) {
-              await fetch('/answer', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index, answer: [selected.value] })
-              });
-            }
+            const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
+            const answers = Array.from(checked).map(input => input.value);
+            await fetch('/answer', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ index, answer: answers })
+            });
             window.location.href = '/test/question?index=' + (index + 1);
           }
-          async function finishTest() {
-            const selected = document.querySelector('input[name="q' + ${index} + '"]:checked');
-            if (selected) {
-              await fetch('/answer', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index: ${index}, answer: [selected.value] })
-              });
-            }
+          async function finishTest(index) {
+            const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
+            const answers = Array.from(checked).map(input => input.value);
+            await fetch('/answer', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ index, answer: answers })
+            });
             window.location.href = '/result';
           }
         </script>
@@ -202,7 +200,7 @@ app.post('/answer', checkAuth, (req, res) => {
     const { index, answer } = req.body;
     const userTest = userTests.get(req.user);
     if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
-    userTest.answers[index] = answer;
+    userTest.answers[index] = answer || [];
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /answer:', error.stack);
@@ -220,13 +218,13 @@ app.get('/result', checkAuth, async (req, res) => {
   const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
 
   questions.forEach((q, index) => {
-    const userAnswer = answers[index];
-    if (q.type === 'multiple' && userAnswer) {
+    const userAnswer = answers[index] || [];
+    if (q.type === 'multiple' && userAnswer.length > 0) {
       const correctAnswers = q.correctAnswers.map(String);
-      if (Array.isArray(userAnswer) && 
-          userAnswer.length === correctAnswers.length && 
-          userAnswer.every(val => correctAnswers.includes(String(val))) && 
-          correctAnswers.every(val => userAnswer.includes(String(val)))) {
+      const userAnswers = userAnswer.map(String);
+      if (correctAnswers.length === userAnswers.length && 
+          correctAnswers.every(val => userAnswers.includes(val)) && 
+          userAnswers.every(val => correctAnswers.includes(val))) {
         score += q.points;
       }
     }
@@ -241,7 +239,7 @@ app.get('/result', checkAuth, async (req, res) => {
       </body>
     </html>
   `;
-  userTests.delete(req.user); // Очистка после завершения
+  userTests.delete(req.user);
   res.send(resultHtml);
 });
 
