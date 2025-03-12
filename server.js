@@ -2,20 +2,37 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const ExcelJS = require('exceljs');
-const fs = require('fs').promises;
+const { createClient } = require('redis');
 
 const app = express();
 
 const validPasswords = {
   'user1': 'pass123',
   'user2': 'pass456',
-  'user3': 'pass789'
+  'user3': 'pass789',
+  'admin': 'adminpass'
 };
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
+
+// Настройка Redis
+const redisClient = createClient({
+  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808'
+});
+
+redisClient.on('error', (err) => console.error('Redis Client Error:', err));
+
+(async () => {
+  try {
+    await redisClient.connect();
+    console.log('Connected to Redis');
+  } catch (err) {
+    console.error('Failed to connect to Redis:', err);
+  }
+})();
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -47,6 +64,14 @@ const checkAuth = (req, res, next) => {
     return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
   }
   req.user = user;
+  next();
+};
+
+const checkAdmin = (req, res, next) => {
+  const user = req.cookies.auth;
+  if (user !== 'admin') {
+    return res.status(403).json({ error: 'Доступно тільки для адміністратора' });
+  }
   next();
 };
 
@@ -98,13 +123,36 @@ const loadQuestions = async (testNumber) => {
 
 const userTests = new Map();
 
+const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime) => {
+  try {
+    const duration = Math.round((endTime - startTime) / 1000);
+    const result = {
+      user,
+      testNumber,
+      score,
+      totalPoints,
+      startTime: new Date(startTime).toISOString(),
+      endTime: new Date(endTime).toISOString(),
+      duration
+    };
+    await redisClient.lPush('test_results', JSON.stringify(result));
+    console.log(`Saved result for ${user} in Redis`);
+  } catch (error) {
+    console.error('Ошибка сохранения в Redis:', error.stack);
+  }
+};
+
 app.get('/test', checkAuth, async (req, res) => {
   const testNumber = req.query.test === '2' ? 2 : 1;
   try {
     const questions = await loadQuestions(testNumber);
-    const enhancedQuestions = questions.map((q, index) => {
-      q.image = `/images/Picture ${index + 1}.png`;
-      console.log(`Assigned image: ${q.question} -> ${q.image}`);
+    const enhancedQuestions = questions.map((q) => {
+      const pictureMatch = q.question.match(/^Picture (\d+)/i);
+      if (pictureMatch) {
+        const pictureNum = pictureMatch[1];
+        q.image = `/images/Picture ${pictureNum}.png`;
+        console.log(`Assigned image: ${q.question} -> ${q.image}`);
+      }
       return q;
     });
 
@@ -112,7 +160,8 @@ app.get('/test', checkAuth, async (req, res) => {
       testNumber,
       questions: enhancedQuestions,
       answers: {},
-      currentQuestion: 0
+      currentQuestion: 0,
+      startTime: Date.now()
     });
 
     res.redirect(`/test/question?index=0`);
@@ -149,7 +198,7 @@ app.get('/test/question', checkAuth, (req, res) => {
           <p>${index + 1}. ${q.question}</p>
   `;
   if (q.image) {
-    html += `<img src="${q.image}" alt="Picture ${index + 1}" style="max-width: 300px;" onerror="console.log('Image failed to load: ${q.image}')"><br>`;
+    html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;" onerror="console.log('Image failed to load: ${q.image}')"><br>`;
   }
   q.options.forEach((option, optIndex) => {
     const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
@@ -208,7 +257,7 @@ app.get('/result', checkAuth, async (req, res) => {
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
 
-  const { questions, answers, testNumber } = userTest;
+  const { questions, answers, testNumber, startTime } = userTest;
   let score = 0;
   const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
 
@@ -224,6 +273,9 @@ app.get('/result', checkAuth, async (req, res) => {
       }
     }
   });
+
+  const endTime = Date.now();
+  await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime);
 
   const resultHtml = `
     <!DOCTYPE html>
@@ -257,7 +309,7 @@ app.get('/results', checkAuth, async (req, res) => {
   `;
   
   if (userTest) {
-    const { questions, answers, testNumber } = userTest;
+    const { questions, answers, testNumber, startTime } = userTest;
     let score = 0;
     const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
 
@@ -273,8 +325,9 @@ app.get('/results', checkAuth, async (req, res) => {
         }
       }
     });
+    const duration = Math.round((Date.now() - startTime) / 1000);
     resultsHtml += `
-      <p>Тест ${testNumber}: ${score} з ${totalPoints}</p>
+      <p>Тест ${testNumber}: ${score} з ${totalPoints}, тривалість: ${duration} сек</p>
     `;
     userTests.delete(req.user);
   } else {
@@ -287,6 +340,65 @@ app.get('/results', checkAuth, async (req, res) => {
     </html>
   `;
   res.send(resultsHtml);
+});
+
+app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const results = await redisClient.lRange('test_results', 0, -1);
+    let adminHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Результати всіх користувачів</title>
+          <style>
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid black; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+          </style>
+        </head>
+        <body>
+          <h1>Результати всіх користувачів</h1>
+          <table>
+            <tr>
+              <th>Користувач</th>
+              <th>Тест</th>
+              <th>Очки</th>
+              <th>Максимум</th>
+              <th>Початок</th>
+              <th>Кінець</th>
+              <th>Тривалість (сек)</th>
+            </tr>
+    `;
+    if (results.length === 0) {
+      adminHtml += '<tr><td colspan="7">Немає результатів</td></tr>';
+    } else {
+      results.forEach(result => {
+        const r = JSON.parse(result);
+        adminHtml += `
+          <tr>
+            <td>${r.user}</td>
+            <td>${r.testNumber}</td>
+            <td>${r.score}</td>
+            <td>${r.totalPoints}</td>
+            <td>${r.startTime}</td>
+            <td>${r.endTime}</td>
+            <td>${r.duration}</td>
+          </tr>
+        `;
+      });
+    }
+    adminHtml += `
+          </table>
+          <button onclick="window.location.href='/'">Повернутися на головну</button>
+        </body>
+      </html>
+    `;
+    res.send(adminHtml);
+  } catch (error) {
+    console.error('Ошибка в /admin/results:', error.stack);
+    res.status(500).send('Помилка при завантаженні результатів');
+  }
 });
 
 module.exports = app;
