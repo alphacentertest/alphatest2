@@ -37,7 +37,7 @@ app.post('/login', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /login:', error.stack);
-    res.status(500).json({ success: false, message: 'Помилка сервера', details: error.message });
+    res.status(500).json({ success: false, message: 'Помилка сервера' });
   }
 });
 
@@ -107,9 +107,7 @@ app.get('/test', checkAuth, async (req, res) => {
       if (pictureMatch) {
         const pictureNum = pictureMatch[1];
         q.image = `/images/Picture ${pictureNum}.png`;
-        console.log(`Assigned image for question: ${q.question} -> ${q.image}`);
-      } else {
-        console.log(`No image for question: ${q.question}`);
+        console.log(`Assigned image: ${q.question} -> ${q.image}`);
       }
       return q;
     });
@@ -206,7 +204,7 @@ app.post('/answer', checkAuth, (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /answer:', error.stack);
-    res.status(500).json({ error: 'Ошибка при сохранении ответа', details: error.message });
+    res.status(500).json({ error: 'Помилка сервера' });
   }
 });
 
