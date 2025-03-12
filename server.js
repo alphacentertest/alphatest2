@@ -102,13 +102,9 @@ app.get('/test', checkAuth, async (req, res) => {
   const testNumber = req.query.test === '2' ? 2 : 1;
   try {
     const questions = await loadQuestions(testNumber);
-    const enhancedQuestions = questions.map((q) => {
-      const pictureMatch = q.question.match(/^Picture (\d+)/i);
-      if (pictureMatch) {
-        const pictureNum = pictureMatch[1];
-        q.image = `/images/Picture ${pictureNum}.png`;
-        console.log(`Assigned image: ${q.question} -> ${q.image}`);
-      }
+    const enhancedQuestions = questions.map((q, index) => {
+      q.image = `/images/Picture ${index + 1}.png`;
+      console.log(`Assigned image: ${q.question} -> ${q.image}`);
       return q;
     });
 
@@ -153,7 +149,7 @@ app.get('/test/question', checkAuth, (req, res) => {
           <p>${index + 1}. ${q.question}</p>
   `;
   if (q.image) {
-    html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;" onerror="console.log('Image failed to load: ${q.image}')"><br>`;
+    html += `<img src="${q.image}" alt="Picture ${index + 1}" style="max-width: 300px;" onerror="console.log('Image failed to load: ${q.image}')"><br>`;
   }
   q.options.forEach((option, optIndex) => {
     const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
