@@ -24,13 +24,15 @@ const redisClient = createClient({
 });
 
 redisClient.on('error', (err) => console.error('Redis Client Error:', err));
+redisClient.on('connect', () => console.log('Redis connected'));
+redisClient.on('reconnecting', () => console.log('Redis reconnecting'));
 
 (async () => {
   try {
     await redisClient.connect();
     console.log('Connected to Redis');
   } catch (err) {
-    console.error('Failed to connect to Redis:', err);
+    console.error('Failed to connect to Redis on startup:', err);
   }
 })();
 
@@ -111,12 +113,15 @@ const loadQuestions = async (testNumber) => {
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber > 1) {
         const rowValues = row.values.slice(1);
+        const picture = String(rowValues[0] || '').trim();
+        const questionText = String(rowValues[1] || '').trim();
         jsonData.push({
-          question: String(rowValues[0] || ''),
-          options: rowValues.slice(1, 7).filter(Boolean),
-          correctAnswers: rowValues.slice(7, 10).filter(Boolean),
-          type: rowValues[10] || 'multiple',
-          points: Number(rowValues[11]) || 0
+          picture: picture.match(/^Picture (\d+)/i) ? `/images/Picture ${picture.match(/^Picture (\d+)/i)[1]}.png` : null,
+          text: questionText,
+          options: rowValues.slice(2, 8).filter(Boolean),
+          correctAnswers: rowValues.slice(8, 11).filter(Boolean),
+          type: rowValues[11] || 'multiple',
+          points: Number(rowValues[12]) || 0
         });
       }
     });
@@ -131,6 +136,10 @@ const userTests = new Map();
 
 const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime) => {
   try {
+    if (!redisClient.isOpen) {
+      await redisClient.connect();
+      console.log('Reconnected to Redis in saveResult');
+    }
     const duration = Math.round((endTime - startTime) / 1000);
     const result = {
       user,
@@ -153,27 +162,13 @@ app.get('/test', checkAuth, async (req, res) => {
   const testNumber = req.query.test === '2' ? 2 : 1;
   try {
     const questions = await loadQuestions(testNumber);
-    const enhancedQuestions = questions.map((q) => {
-      const pictureMatch = q.question.match(/^Picture (\d+)/i);
-      if (pictureMatch) {
-        const pictureNum = pictureMatch[1];
-        q.image = `/images/Picture ${pictureNum}.png`;
-        q.text = q.question.replace(/^Picture \d+\.\s*/i, '').trim(); // Убираем "Picture X" и оставляем текст
-        console.log(`Assigned image: ${q.question} -> ${q.image}, Text: ${q.text}`);
-      } else {
-        q.text = q.question; // Если нет картинки, весь текст остается
-      }
-      return q;
-    });
-
     userTests.set(req.user, {
       testNumber,
-      questions: enhancedQuestions,
+      questions,
       answers: {},
       currentQuestion: 0,
       startTime: Date.now()
     });
-
     res.redirect(`/test/question?index=0`);
   } catch (error) {
     console.error('Ошибка в /test:', error.stack);
@@ -195,7 +190,7 @@ app.get('/test/question', checkAuth, (req, res) => {
 
   userTest.currentQuestion = index;
   const q = questions[index];
-  console.log('Rendering question:', { index, image: q.image, text: q.text });
+  console.log('Rendering question:', { index, picture: q.picture, text: q.text });
   let html = `
     <!DOCTYPE html>
     <html>
@@ -207,8 +202,8 @@ app.get('/test/question', checkAuth, (req, res) => {
         <h1>Тест ${testNumber}</h1>
         <div>
   `;
-  if (q.image) {
-    html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;" onerror="this.src='/images/placeholder.png'; console.log('Image failed to load: ${q.image}')"><br>`;
+  if (q.picture) {
+    html += `<img src="${q.picture}" alt="Picture" style="max-width: 300px;" onerror="this.src='/images/placeholder.png'; console.log('Image failed to load: ${q.picture}')"><br>`;
   }
   html += `
           <p>${index + 1}. ${q.text}</p>
@@ -360,7 +355,12 @@ app.get('/results', checkAuth, async (req, res) => {
 
 app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
   try {
+    if (!redisClient.isOpen) {
+      await redisClient.connect();
+      console.log('Reconnected to Redis in /admin/results');
+    }
     const results = await redisClient.lRange('test_results', 0, -1);
+    console.log('Fetched results from Redis:', results);
     let adminHtml = `
       <!DOCTYPE html>
       <html>
@@ -386,22 +386,27 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
               <th>Тривалість (сек)</th>
             </tr>
     `;
-    if (results.length === 0) {
+    if (!results || results.length === 0) {
       adminHtml += '<tr><td colspan="7">Немає результатів</td></tr>';
     } else {
-      results.forEach(result => {
-        const r = JSON.parse(result);
-        adminHtml += `
-          <tr>
-            <td>${r.user}</td>
-            <td>${r.testNumber}</td>
-            <td>${r.score}</td>
-            <td>${r.totalPoints}</td>
-            <td>${r.startTime}</td>
-            <td>${r.endTime}</td>
-            <td>${r.duration}</td>
-          </tr>
-        `;
+      results.forEach((result, index) => {
+        try {
+          const r = JSON.parse(result);
+          console.log(`Parsed result ${index}:`, r);
+          adminHtml += `
+            <tr>
+              <td>${r.user || 'N/A'}</td>
+              <td>${r.testNumber || 'N/A'}</td>
+              <td>${r.score || '0'}</td>
+              <td>${r.totalPoints || '0'}</td>
+              <td>${r.startTime || 'N/A'}</td>
+              <td>${r.endTime || 'N/A'}</td>
+              <td>${r.duration || 'N/A'}</td>
+            </tr>
+          `;
+        } catch (parseError) {
+          console.error(`Ошибка парсинга результата ${index}:`, parseError, 'Raw data:', result);
+        }
       });
     }
     adminHtml += `
