@@ -1,12 +1,12 @@
 const express = require('express');
-const session = require('express-session');
+const cookieParser = require('cookie-parser');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const fs = require('fs').promises;
 
 const app = express();
 
-// Пароли для каждого пользователя
+// Пароли
 const validPasswords = {
   'user1': 'pass123',
   'user2': 'pass456',
@@ -17,32 +17,27 @@ const validPasswords = {
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(session({
-  secret: 'your-secret-key',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
-}));
+app.use(cookieParser());
 
-// Главная страница (логин)
+// Главная страница
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Обработка логина
+// Логин
 app.post('/login', async (req, res) => {
   try {
     const { password } = req.body;
-    console.log('Login attempt:', { password });
     if (!password) return res.status(400).json({ success: false, message: 'Пароль не вказано' });
     const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
     if (!user) return res.status(401).json({ success: false, message: 'Невірний пароль' });
 
-    req.session.loggedIn = true;
-    req.session.user = user;
-    req.session.results = req.session.results || [];
-    req.session.answers = req.session.answers || {};
-    console.log('Session after login:', req.session);
+    res.cookie('auth', user, {
+      maxAge: 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /login:', error.stack);
@@ -50,12 +45,18 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Страница выбора теста
-app.get('/select-test', (req, res) => {
-  console.log('Accessing /select-test, session:', req.session);
-  if (!req.session.loggedIn) {
+// Проверка авторизации
+const checkAuth = (req, res, next) => {
+  const user = req.cookies.auth;
+  if (!user || !validPasswords[user]) {
     return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
   }
+  req.user = user;
+  next();
+};
+
+// Выбор теста
+app.get('/select-test', checkAuth, (req, res) => {
   res.send(`
     <html>
       <body>
@@ -67,12 +68,11 @@ app.get('/select-test', (req, res) => {
   `);
 });
 
-// Загрузка вопросов из файла
+// Загрузка вопросов
 const loadQuestions = async (testNumber) => {
   try {
     const workbook = new ExcelJS.Workbook();
     const filePath = path.join(__dirname, `questions${testNumber}.xlsx`);
-    console.log(`Reading file: ${filePath}`);
     await workbook.xlsx.readFile(filePath);
     const jsonData = [];
     const sheet = workbook.getWorksheet('Questions');
@@ -82,7 +82,6 @@ const loadQuestions = async (testNumber) => {
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber > 1) {
         const rowValues = row.values.slice(1);
-        console.log(`Row ${rowNumber}:`, rowValues);
         jsonData.push({
           question: String(rowValues[0] || ''),
           options: rowValues.slice(1, 7).filter(Boolean),
@@ -92,8 +91,6 @@ const loadQuestions = async (testNumber) => {
         });
       }
     });
-
-    console.log(`Questions loaded for test ${testNumber}:`, jsonData);
     return jsonData;
   } catch (error) {
     console.error(`Ошибка в loadQuestions (test ${testNumber}):`, error.stack);
@@ -101,13 +98,12 @@ const loadQuestions = async (testNumber) => {
   }
 };
 
-// Маршрут для теста
-app.get('/test', async (req, res) => {
-  if (!req.session.loggedIn) {
-    return res.status(403).send('Будь ласка, увійдіть спочатку');
-  }
+// Хранилище ответов и текущего теста
+const userTests = new Map();
+
+// Начало теста
+app.get('/test', checkAuth, async (req, res) => {
   const testNumber = req.query.test === '2' ? 2 : 1;
-  req.session.currentTest = testNumber;
   try {
     const questions = await loadQuestions(testNumber);
     const enhancedQuestions = questions.map((q) => {
@@ -120,67 +116,93 @@ app.get('/test', async (req, res) => {
       return q;
     });
 
-    let html = `
-      <html>
-        <body>
-          <h1>Тест ${testNumber}</h1>
-          <form id="testForm">
-    `;
-    enhancedQuestions.forEach((q, index) => {
-      html += `<div>
-        <p>${index + 1}. ${q.question}</p>`;
-      if (q.image) {
-        html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;"><br>`;
-      }
-      q.options.forEach((option, optIndex) => {
-        html += `
-          <input type="radio" name="q${index}" value="${option}" id="q${index}_${optIndex}">
-          <label for="q${index}_${optIndex}">${option}</label><br>
-        `;
-      });
-      html += `</div><br>`;
+    userTests.set(req.user, {
+      testNumber,
+      questions: enhancedQuestions,
+      answers: {},
+      currentQuestion: 0
     });
-    html += `
-          <button type="button" onclick="submitAnswers()">Відправити відповіді</button>
-          </form>
-          <script>
-            async function submitAnswers() {
-              const form = document.getElementById('testForm');
-              const answers = {};
-              ${enhancedQuestions.map((_, i) => `
-                const selected = form.querySelector('input[name="q${i}"]:checked');
-                if (selected) answers[${i}] = [selected.value];
-              `).join('')}
-              await fetch('/answer', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ answers })
-              });
-              const response = await fetch('/result');
-              const data = await response.json();
-              alert('Ваш результат: ' + data.score + ' з ' + data.totalPoints);
-              window.location.href = '/results';
-            }
-          </script>
-        </body>
-      </html>
-    `;
-    res.send(html);
+
+    res.redirect(`/test/question?index=0`);
   } catch (error) {
     console.error('Ошибка в /test:', error.stack);
     res.status(500).send('Помилка при завантаженні тесту');
   }
 });
 
+// Отображение вопроса
+app.get('/test/question', checkAuth, (req, res) => {
+  const userTest = userTests.get(req.user);
+  if (!userTest) return res.status(400).send('Тест не розпочато');
+
+  const { questions, currentQuestion, testNumber } = userTest;
+  const index = parseInt(req.query.index) || 0;
+
+  if (index < 0 || index >= questions.length) {
+    return res.status(400).send('Невірний номер питання');
+  }
+
+  userTest.currentQuestion = index;
+  const q = questions[index];
+  let html = `
+    <html>
+      <body>
+        <h1>Тест ${testNumber}</h1>
+        <div>
+          <p>${index + 1}. ${q.question}</p>
+  `;
+  if (q.image) {
+    html += `<img src="${q.image}" alt="Picture" style="max-width: 300px;"><br>`;
+  }
+  q.options.forEach((option, optIndex) => {
+    const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
+    html += `
+      <input type="radio" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
+      <label for="q${index}_${optIndex}">${option}</label><br>
+    `;
+  });
+  html += `
+        </div><br>
+        <button ${index === 0 ? 'disabled' : ''} onclick="window.location.href='/test/question?index=${index - 1}'">Назад</button>
+        <button ${index === questions.length - 1 ? 'disabled' : ''} onclick="saveAndNext(${index})">Вперед</button>
+        <button onclick="finishTest()">Завершити тест</button>
+        <script>
+          async function saveAndNext(index) {
+            const selected = document.querySelector('input[name="q' + index + '"]:checked');
+            if (selected) {
+              await fetch('/answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index, answer: [selected.value] })
+              });
+            }
+            window.location.href = '/test/question?index=' + (index + 1);
+          }
+          async function finishTest() {
+            const selected = document.querySelector('input[name="q' + ${index} + '"]:checked');
+            if (selected) {
+              await fetch('/answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index: ${index}, answer: [selected.value] })
+              });
+            }
+            window.location.href = '/result';
+          }
+        </script>
+      </body>
+    </html>
+  `;
+  res.send(html);
+});
+
 // Сохранение ответа
-app.post('/answer', (req, res) => {
-  if (!req.session.loggedIn) return res.status(403).json({ error: 'Не авторизовано' });
+app.post('/answer', checkAuth, (req, res) => {
   try {
-    if (!req.session.answers) req.session.answers = {};
-    const { answers } = req.body;
-    Object.keys(answers).forEach(index => {
-      req.session.answers[index] = answers[index];
-    });
+    const { index, answer } = req.body;
+    const userTest = userTests.get(req.user);
+    if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
+    userTest.answers[index] = answer;
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /answer:', error.stack);
@@ -188,73 +210,44 @@ app.post('/answer', (req, res) => {
   }
 });
 
-// Подсчет результатов
-app.get('/result', async (req, res) => {
-  if (!req.session.loggedIn) return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
-  const testNumber = req.session.currentTest || 1;
-  try {
-    const questions = await loadQuestions(testNumber);
-    let score = 0;
-    const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
-    const answers = req.session.answers || {};
+// Результаты
+app.get('/result', checkAuth, async (req, res) => {
+  const userTest = userTests.get(req.user);
+  if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
 
-    questions.forEach((q, index) => {
-      const userAnswer = answers[index];
-      if (q.type === 'multiple' && userAnswer) {
-        const correctAnswers = q.correctAnswers.map(String);
-        if (Array.isArray(userAnswer) && 
-            userAnswer.length === correctAnswers.length && 
-            userAnswer.every(val => correctAnswers.includes(String(val))) && 
-            correctAnswers.every(val => userAnswer.includes(String(val)))) {
-          score += q.points;
-        }
-      } else if (q.type === 'input' && userAnswer && typeof userAnswer === 'string') {
-        if (userAnswer.trim().toLowerCase() === q.correctAnswers[0].toLowerCase()) score += q.points;
+  const { questions, answers, testNumber } = userTest;
+  let score = 0;
+  const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
+
+  questions.forEach((q, index) => {
+    const userAnswer = answers[index];
+    if (q.type === 'multiple' && userAnswer) {
+      const correctAnswers = q.correctAnswers.map(String);
+      if (Array.isArray(userAnswer) && 
+          userAnswer.length === correctAnswers.length && 
+          userAnswer.every(val => correctAnswers.includes(String(val))) && 
+          correctAnswers.every(val => userAnswer.includes(String(val)))) {
+        score += q.points;
       }
-    });
-
-    const resultData = { 
-      user: req.session.user, 
-      test: `Test ${testNumber}`, 
-      score, 
-      totalPoints, 
-      answers, 
-      timestamp: new Date().toISOString() 
-    };
-    req.session.results = req.session.results || [];
-    req.session.results.push(resultData);
-    console.log('Saved result:', resultData);
-    res.json({ score, totalPoints });
-  } catch (error) {
-    console.error('Ошибка в /result:', error.stack);
-    res.status(500).json({ error: 'Помилка при підрахунку результатів', details: error.message });
-  }
-});
-
-// Просмотр результатов
-app.get('/results', async (req, res) => {
-  if (!req.session.loggedIn) {
-    return res.status(403).json({ error: 'Будь ласка, увійдіть спочатку' });
-  }
-  const adminPassword = 'admin123';
-  try {
-    const allResults = req.session.results || [];
-    if (req.query.admin === adminPassword) {
-      res.json(allResults);
-    } else {
-      const userResults = allResults.filter(result => result.user === req.session.user);
-      res.json(userResults);
     }
-  } catch (error) {
-    console.error('Ошибка в /results:', error.stack);
-    res.status(500).json({ error: 'Помилка при завантаженні результатів', details: error.message });
-  }
+  });
+
+  const resultHtml = `
+    <html>
+      <body>
+        <h1>Результати Тесту ${testNumber}</h1>
+        <p>Ваш результат: ${score} з ${totalPoints}</p>
+        <button onclick="window.location.href='/'">Повернутися на головну</button>
+      </body>
+    </html>
+  `;
+  userTests.delete(req.user); // Очистка после завершения
+  res.send(resultHtml);
 });
 
 // Экспорт для Vercel
 module.exports = app;
 
-// Локальный запуск
 if (require.main === module) {
   const port = process.env.PORT || 3000;
   app.listen(port, () => {
