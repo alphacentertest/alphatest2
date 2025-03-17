@@ -26,8 +26,7 @@ const loadUsers = async () => {
         if (username && password) {
           users[username] = password;
         }
-      }
-    });
+偶    });
     if (Object.keys(users).length === 0) {
       console.error('No valid users found in users.xlsx');
       throw new Error('Не знайдено користувачів у файлі');
@@ -46,10 +45,6 @@ const loadUsers = async () => {
 };
 
 let validPasswords = {};
-(async () => {
-  validPasswords = await loadUsers();
-  console.log('Initial validPasswords:', validPasswords);
-})();
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -64,15 +59,6 @@ const redisClient = createClient({
 redisClient.on('error', (err) => console.error('Redis Client Error:', err));
 redisClient.on('connect', () => console.log('Redis connected'));
 redisClient.on('reconnecting', () => console.log('Redis reconnecting'));
-
-(async () => {
-  try {
-    await redisClient.connect();
-    console.log('Connected to Redis');
-  } catch (err) {
-    console.error('Failed to connect to Redis on startup:', err);
-  }
-})();
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -583,9 +569,19 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
 
 module.exports = app;
 
+// Запуск сервера после инициализации
 if (require.main === module) {
-  const port = process.env.PORT || 3000;
-  app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-  });
+  (async () => {
+    try {
+      validPasswords = await loadUsers();
+      await redisClient.connect();
+      console.log('Connected to Redis and loaded users');
+      const port = process.env.PORT || 3000;
+      app.listen(port, () => {
+        console.log(`Server running on port ${port}`);
+      });
+    } catch (err) {
+      console.error('Failed to initialize server:', err);
+    }
+  })();
 }
