@@ -67,7 +67,9 @@ app.post('/login', async (req, res) => {
 
 const checkAuth = (req, res, next) => {
   const user = req.cookies.auth;
+  console.log('checkAuth: user from cookies:', user);
   if (!user || !validPasswords[user]) {
+    console.log('checkAuth: No valid auth cookie, redirecting to /');
     return res.redirect('/');
   }
   req.user = user;
@@ -76,8 +78,10 @@ const checkAuth = (req, res, next) => {
 
 const checkAdmin = (req, res, next) => {
   const user = req.cookies.auth;
+  console.log('checkAdmin: user from cookies:', user);
   if (user !== 'admin') {
-    return res.status(403).json({ error: 'Доступно тільки для адміністратора' });
+    console.log('checkAdmin: Not admin, returning 403');
+    return res.status(403).send('Доступно тільки для адміністратора (403 Forbidden)');
   }
   next();
 };
@@ -141,7 +145,6 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       await redisClient.connect();
       console.log('Reconnected to Redis in saveResult');
     }
-
     const keyType = await redisClient.type('test_results');
     console.log('Type of test_results before save:', keyType);
     if (keyType !== 'list' && keyType !== 'none') {
@@ -149,6 +152,9 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       await redisClient.del('test_results');
       console.log('test_results cleared, new type:', await redisClient.type('test_results'));
     }
+
+    const userTest = userTests.get(user);
+    const answers = userTest ? userTest.answers : {};
 
     const duration = Math.round((endTime - startTime) / 1000);
     const result = {
@@ -158,7 +164,8 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       totalPoints,
       startTime: new Date(startTime).toISOString(),
       endTime: new Date(endTime).toISOString(),
-      duration
+      duration,
+      answers
     };
     console.log('Saving result to Redis:', result);
     await redisClient.lPush('test_results', JSON.stringify(result));
@@ -283,7 +290,7 @@ app.post('/answer', checkAuth, (req, res) => {
     const { index, answer } = req.body;
     const userTest = userTests.get(req.user);
     if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
-    userTest.answers[index] = answer; // Сохраняем как массив или строку
+    userTest.answers[index] = answer;
     res.json({ success: true });
   } catch (error) {
     console.error('Ошибка в /answer:', error.stack);
@@ -395,38 +402,26 @@ app.get('/results', checkAuth, async (req, res) => {
 });
 
 app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
-  let redisConnected = false;
+  let results = [];
+  let errorMessage = '';
   try {
     if (!redisClient.isOpen) {
       console.log('Redis not connected in /admin/results, attempting to reconnect...');
       await redisClient.connect();
       console.log('Reconnected to Redis in /admin/results');
     }
-    redisConnected = true;
-  } catch (connectError) {
-    console.error('Failed to connect to Redis in /admin/results:', connectError);
-  }
-
-  let results = [];
-  let errorMessage = '';
-  if (redisConnected) {
-    try {
-      const keyType = await redisClient.type('test_results');
-      console.log('Type of test_results:', keyType);
-      if (keyType !== 'list' && keyType !== 'none') {
-        errorMessage = `Неверный тип данных для test_results: ${keyType}. Ожидается list.`;
-        console.error(errorMessage);
-      } else {
-        results = await redisClient.lRange('test_results', 0, -1);
-        console.log('Fetched results from Redis:', results);
-      }
-    } catch (fetchError) {
-      console.error('Ошибка при получении данных из Redis:', fetchError);
-      errorMessage = `Ошибка Redis: ${fetchError.message}`;
+    const keyType = await redisClient.type('test_results');
+    console.log('Type of test_results:', keyType);
+    if (keyType !== 'list' && keyType !== 'none') {
+      errorMessage = `Неверный тип данных для test_results: ${keyType}. Ожидается list.`;
+      console.error(errorMessage);
+    } else {
+      results = await redisClient.lRange('test_results', 0, -1);
+      console.log('Fetched results from Redis:', results);
     }
-  } else {
-    console.log('Redis not connected, skipping fetch');
-    errorMessage = 'Нет подключения к Redis';
+  } catch (fetchError) {
+    console.error('Ошибка при получении данных из Redis:', fetchError);
+    errorMessage = `Ошибка Redis: ${fetchError.message}`;
   }
 
   let adminHtml = `
@@ -440,11 +435,11 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
           th, td { border: 1px solid black; padding: 8px; text-align: left; }
           th { background-color: #f2f2f2; }
           .error { color: red; }
+          .answers { white-space: pre-wrap; max-width: 300px; overflow-wrap: break-word; }
         </style>
       </head>
       <body>
         <h1>Результати всіх користувачів</h1>
-        <p>Статус Redis: ${redisConnected ? 'Підключено' : 'Немає підключення'}</p>
   `;
   if (errorMessage) {
     adminHtml += `<p class="error">${errorMessage}</p>`;
@@ -459,16 +454,20 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
             <th>Початок</th>
             <th>Кінець</th>
             <th>Тривалість (сек)</th>
+            <th>Відповіді</th>
           </tr>
   `;
   if (!results || results.length === 0) {
-    adminHtml += '<tr><td colspan="7">Немає результатів</td></tr>';
+    adminHtml += '<tr><td colspan="8">Немає результатів</td></tr>';
     console.log('No results found in test_results');
   } else {
     results.forEach((result, index) => {
       try {
         const r = JSON.parse(result);
         console.log(`Parsed result ${index}:`, r);
+        const answersDisplay = r.answers 
+          ? Object.entries(r.answers).map(([q, a]) => `Питання ${parseInt(q) + 1}: ${Array.isArray(a) ? a.join(', ') : a}`).join('\n')
+          : 'Немає відповідей';
         adminHtml += `
           <tr>
             <td>${r.user || 'N/A'}</td>
@@ -478,6 +477,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
             <td>${r.startTime || 'N/A'}</td>
             <td>${r.endTime || 'N/A'}</td>
             <td>${r.duration || 'N/A'}</td>
+            <td class="answers">${answersDisplay}</td>
           </tr>
         `;
       } catch (parseError) {
