@@ -137,9 +137,19 @@ const userTests = new Map();
 const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime) => {
   try {
     if (!redisClient.isOpen) {
+      console.log('Redis not connected in saveResult, attempting to reconnect...');
       await redisClient.connect();
       console.log('Reconnected to Redis in saveResult');
     }
+
+    const keyType = await redisClient.type('test_results');
+    console.log('Type of test_results before save:', keyType);
+    if (keyType !== 'list' && keyType !== 'none') {
+      console.log('Incorrect type detected, clearing test_results');
+      await redisClient.del('test_results');
+      console.log('test_results cleared, new type:', await redisClient.type('test_results'));
+    }
+
     const duration = Math.round((endTime - startTime) / 1000);
     const result = {
       user,
@@ -150,8 +160,10 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       endTime: new Date(endTime).toISOString(),
       duration
     };
+    console.log('Saving result to Redis:', result);
     await redisClient.lPush('test_results', JSON.stringify(result));
-    console.log(`Saved result for ${user} in Redis`);
+    console.log(`Successfully saved result for ${user} in Redis`);
+    console.log('Type of test_results after save:', await redisClient.type('test_results'));
   } catch (error) {
     console.error('Ошибка сохранения в Redis:', error.stack);
   }
