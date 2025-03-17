@@ -1,22 +1,64 @@
+Спасибо за предоставленный скриншот логов Vercel! Давайте проанализируем ситуацию и найдем причину, почему validPasswords остается пустым (Checking password: pass111 against validPasswords: {}).
+
+Анализ логов
+Отсутствие логов инициализации:
+В логах нет строк вроде Starting server initialization..., Attempting to load users from:, или Loaded users from Excel:. Это указывает на то, что блок инициализации сервера ((async () => { ... })) не выполняется должным образом до обработки запросов.
+Лог /login:
+Checking password: pass111 against validPasswords: {} — сервер уже принимает запросы, но validPasswords не инициализирован, что подтверждает, что loadUsers не завершился до этого момента.
+Потенциальная причина:
+Проблема может быть в том, что Vercel не дожидается завершения асинхронной инициализации перед запуском приложения. В предыдущем коде мы использовали if (require.main === module) для запуска сервера, но Vercel может игнорировать этот блок или запускать приложение раньше, чем завершится loadUsers.
+Файл users.xlsx:
+Логи не показывают ошибок типа File users.xlsx not found, но это может быть связано с тем, что проверка файла даже не дошла до стадии выполнения.
+Исправление
+Проблема связана с тем, как Vercel обрабатывает асинхронную инициализацию. Нам нужно убедиться, что сервер не начинает принимать запросы, пока loadUsers не завершится. Для этого мы можем:
+
+Использовать middleware для проверки инициализации перед каждым запросом.
+Убедиться, что loadUsers выполняется до старта сервера.
+Обновленный server.js
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const { createClient } = require('redis');
+const fs = require('fs');
 
 const app = express();
 
+let validPasswords = {};
+let isInitialized = false;
+
 const loadUsers = async () => {
   try {
-    const workbook = new ExcelJS.Workbook();
     const filePath = path.join(__dirname, 'users.xlsx');
     console.log('Attempting to load users from:', filePath);
-    await workbook.xlsx.readFile(filePath);
-    const sheet = workbook.getWorksheet('Users');
-    if (!sheet) {
-      console.error('Worksheet "Users" not found in users.xlsx');
-      throw new Error('Лист "Users" не знайдено');
+
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File users.xlsx not found at path: ${filePath}`);
     }
+    console.log('File users.xlsx exists at:', filePath);
+
+    const workbook = new ExcelJS.Workbook();
+    console.log('Reading users.xlsx file...');
+    await workbook.xlsx.readFile(filePath);
+    console.log('File read successfully');
+
+    let sheet = workbook.getWorksheet('Users');
+    if (!sheet) {
+      console.warn('Worksheet "Users" not found, trying "Sheet1"');
+      sheet = workbook.getWorksheet('Sheet1');
+      if (!sheet) {
+        console.error('Worksheet "Sheet1" not found in users.xlsx');
+        throw new Error('Ни один из листов ("Users" или "Sheet1") не найден');
+      }
+    }
+    console.log('Worksheet found:', sheet.name);
 
     const users = {};
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
@@ -35,22 +77,24 @@ const loadUsers = async () => {
     console.log('Loaded users from Excel:', users);
     return users;
   } catch (error) {
-    console.error('Ошибка загрузки пользователей из users.xlsx:', error.stack);
-    return {
-      'user1': 'pass123',
-      'user2': 'pass456',
-      'user3': 'pass789',
-      'admin': 'adminpass'
-    };
+    console.error('Error loading users from users.xlsx:', error.message, error.stack);
+    throw error;
   }
 };
 
-let validPasswords = {};
+// Middleware для проверки инициализации
+const ensureInitialized = (req, res, next) => {
+  if (!isInitialized) {
+    return res.status(503).json({ success: false, message: 'Server is initializing, please try again later' });
+  }
+  next();
+};
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
+app.use(ensureInitialized); // Применяем middleware ко всем маршрутам
 
 // Настройка Redis
 const redisClient = createClient({
@@ -568,22 +612,20 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
   res.send(adminHtml);
 });
 
-module.exports = app;
+// Инициализация перед запуском
+(async () => {
+  try {
+    console.log('Starting server initialization...');
+    validPasswords = await loadUsers();
+    console.log('Users loaded successfully:', validPasswords);
+    await redisClient.connect();
+    console.log('Connected to Redis and loaded users');
+    isInitialized = true;
+  } catch (err) {
+    console.error('Failed to initialize server:', err.message, err.stack);
+    process.exit(1);
+  }
+})();
 
-// Запуск сервера после инициализации
-if (require.main === module) {
-  (async () => {
-    try {
-      validPasswords = await loadUsers();
-      await redisClient.connect();
-      console.log('Connected to Redis and loaded users');
-      const port = process.env.PORT || 3000;
-      app.listen(port, () => {
-        console.log(`Server running on port ${port}`);
-      });
-    } catch (err) {
-      console.error('Failed to initialize server:', err);
-      process.exit(1); // Завершаем процесс, если инициализация не удалась
-    }
-  })();
-}
+// Экспорт для Vercel
+module.exports = app;
