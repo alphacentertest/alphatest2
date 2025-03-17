@@ -6,12 +6,50 @@ const { createClient } = require('redis');
 
 const app = express();
 
-const validPasswords = {
-  'user1': 'pass123',
-  'user2': 'pass456',
-  'user3': 'pass789',
-  'admin': 'adminpass'
+const loadUsers = async () => {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    const filePath = path.join(__dirname, 'users.xlsx');
+    console.log('Attempting to load users from:', filePath);
+    await workbook.xlsx.readFile(filePath);
+    const sheet = workbook.getWorksheet('Users');
+    if (!sheet) {
+      console.error('Worksheet "Users" not found in users.xlsx');
+      throw new Error('Лист "Users" не знайдено');
+    }
+
+    const users = {};
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber > 1) {
+        const username = String(row.getCell(1).value || '').trim();
+        const password = String(row.getCell(2).value || '').trim();
+        if (username && password) {
+          users[username] = password;
+        }
+      }
+    });
+    if (Object.keys(users).length === 0) {
+      console.error('No valid users found in users.xlsx');
+      throw new Error('Не знайдено користувачів у файлі');
+    }
+    console.log('Loaded users from Excel:', users);
+    return users;
+  } catch (error) {
+    console.error('Ошибка загрузки пользователей из users.xlsx:', error.stack);
+    return {
+      'user1': 'pass123',
+      'user2': 'pass456',
+      'user3': 'pass789',
+      'admin': 'adminpass'
+    };
+  }
 };
+
+let validPasswords = {};
+(async () => {
+  validPasswords = await loadUsers();
+  console.log('Initial validPasswords:', validPasswords);
+})();
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -44,6 +82,7 @@ app.post('/login', async (req, res) => {
   try {
     const { password } = req.body;
     if (!password) return res.status(400).json({ success: false, message: 'Пароль не вказано' });
+    console.log('Checking password:', password, 'against validPasswords:', validPasswords);
     const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
     if (!user) return res.status(401).json({ success: false, message: 'Невірний пароль' });
 
@@ -366,7 +405,7 @@ app.get('/result', checkAuth, async (req, res) => {
         if (correctAnswers.length === userAnswers.length && 
             correctAnswers.every(val => userAnswers.includes(val)) && 
             userAnswers.every(val => correctAnswers.includes(val))) {
-          score += q.points;
+            score += q.points;
         }
       }
     }
@@ -481,7 +520,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
           th, td { border: 1px solid black; padding: 8px; text-align: left; }
           th { background-color: #f2f2f2; }
           .error { color: red; }
-          .answers { white-space: pre-wrap; max-width: 300px; overflow-wrap: break-word; }
+          .answers { white-space: pre-wrap; max-width: 300px; overflow-wrap: break-word; line-height: 1.8; }
         </style>
       </head>
       <body>
