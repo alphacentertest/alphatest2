@@ -9,6 +9,7 @@ const app = express();
 
 let validPasswords = {};
 let isInitialized = false;
+let initializationError = null;
 
 const loadUsers = async () => {
   try {
@@ -61,6 +62,9 @@ const loadUsers = async () => {
 // Middleware для проверки инициализации
 const ensureInitialized = (req, res, next) => {
   if (!isInitialized) {
+    if (initializationError) {
+      return res.status(500).json({ success: false, message: `Server initialization failed: ${initializationError.message}` });
+    }
     return res.status(503).json({ success: false, message: 'Server is initializing, please try again later' });
   }
   next();
@@ -70,11 +74,15 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
-app.use(ensureInitialized); // Применяем middleware ко всем маршрутам
+app.use(ensureInitialized);
 
 // Настройка Redis
 const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808'
+  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808',
+  socket: {
+    connectTimeout: 10000, // Таймаут на подключение 10 секунд
+    reconnectStrategy: (retries) => Math.min(retries * 500, 3000) // Повторная попытка через 500мс, максимум 3с
+  }
 });
 
 redisClient.on('error', (err) => console.error('Redis Client Error:', err));
@@ -599,7 +607,8 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
     isInitialized = true;
   } catch (err) {
     console.error('Failed to initialize server:', err.message, err.stack);
-    process.exit(1);
+    initializationError = err;
+    // Не завершаем процесс, чтобы Vercel не перезапускал сервер бесконечно
   }
 })();
 
