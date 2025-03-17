@@ -392,7 +392,7 @@ app.get('/result', checkAuth, async (req, res) => {
         if (correctAnswers.length === userAnswers.length && 
             correctAnswers.every(val => userAnswers.includes(val)) && 
             userAnswers.every(val => correctAnswers.includes(val))) {
-            score += q.points;
+          score += q.points;
         }
       }
     }
@@ -583,6 +583,7 @@ if (require.main === module) {
       });
     } catch (err) {
       console.error('Failed to initialize server:', err);
+      process.exit(1); // Завершаем процесс, если инициализация не удалась
     }
   })();
 }
