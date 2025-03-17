@@ -26,7 +26,8 @@ const loadUsers = async () => {
         if (username && password) {
           users[username] = password;
         }
-        });
+      }
+    });
     if (Object.keys(users).length === 0) {
       console.error('No valid users found in users.xlsx');
       throw new Error('Не знайдено користувачів у файлі');
