@@ -3,7 +3,10 @@
   "builds": [
     {
       "src": "server.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["users.xlsx", "questions1.xlsx", "questions2.xlsx"]
+      }
     }
   ],
   "routes": [
@@ -11,10 +14,5 @@
       "src": "/(.*)",
       "dest": "server.js"
     }
-  ],
-  "functions": {
-    "server.js": {
-      "includeFiles": ["users.xlsx", "questions1.xlsx", "questions2.xlsx"]
-    }
-  }
+  ]
 }
