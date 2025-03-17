@@ -1,3 +1,315 @@
+Отлично, что все работает! Теперь выполним ваши новые требования:
+
+Добавим в /admin/results информацию о баллах за каждый ответ.
+Увеличим шрифт в тесте в два раза.
+Зафиксируем кнопки "Назад", "Вперед" и "Завершити тест" внизу, чтобы они не прыгали, и сделаем их цветными: красная, синяя и зеленая соответственно.
+Обновление кода
+1. Баллы за каждый ответ в /admin/results
+Добавим в result массив scoresPerQuestion с баллами за каждое питання.
+Обновим отображение в таблице.
+Обновленный saveResult:
+
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime) => {
+  try {
+    if (!redisClient.isOpen) {
+      console.log('Redis not connected in saveResult, attempting to reconnect...');
+      await redisClient.connect();
+      console.log('Reconnected to Redis in saveResult');
+    }
+    const keyType = await redisClient.type('test_results');
+    console.log('Type of test_results before save:', keyType);
+    if (keyType !== 'list' && keyType !== 'none') {
+      console.log('Incorrect type detected, clearing test_results');
+      await redisClient.del('test_results');
+      console.log('test_results cleared, new type:', await redisClient.type('test_results'));
+    }
+
+    const userTest = userTests.get(user);
+    const answers = userTest ? userTest.answers : {};
+    const questions = userTest ? userTest.questions : [];
+    const scoresPerQuestion = questions.map((q, index) => {
+      const userAnswer = answers[index];
+      let questionScore = 0;
+      if (!q.options || q.options.length === 0) {
+        if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
+          questionScore = q.points;
+        }
+      } else {
+        if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+          const correctAnswers = q.correctAnswers.map(String);
+          const userAnswers = userAnswer.map(String);
+          if (correctAnswers.length === userAnswers.length && 
+              correctAnswers.every(val => userAnswers.includes(val)) && 
+              userAnswers.every(val => correctAnswers.includes(val))) {
+            questionScore = q.points;
+          }
+        }
+      }
+      return questionScore;
+    });
+
+    const duration = Math.round((endTime - startTime) / 1000);
+    const result = {
+      user,
+      testNumber,
+      score,
+      totalPoints,
+      startTime: new Date(startTime).toISOString(),
+      endTime: new Date(endTime).toISOString(),
+      duration,
+      answers,
+      scoresPerQuestion
+    };
+    console.log('Saving result to Redis:', result);
+    await redisClient.lPush('test_results', JSON.stringify(result));
+    console.log(`Successfully saved result for ${user} in Redis`);
+    console.log('Type of test_results after save:', await redisClient.type('test_results'));
+  } catch (error) {
+    console.error('Ошибка сохранения в Redis:', error.stack);
+  }
+};
+Обновленный /admin/results:
+
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
+  let results = [];
+  let errorMessage = '';
+  try {
+    if (!redisClient.isOpen) {
+      console.log('Redis not connected in /admin/results, attempting to reconnect...');
+      await redisClient.connect();
+      console.log('Reconnected to Redis in /admin/results');
+    }
+    const keyType = await redisClient.type('test_results');
+    console.log('Type of test_results:', keyType);
+    if (keyType !== 'list' && keyType !== 'none') {
+      errorMessage = `Неверный тип данных для test_results: ${keyType}. Ожидается list.`;
+      console.error(errorMessage);
+    } else {
+      results = await redisClient.lRange('test_results', 0, -1);
+      console.log('Fetched results from Redis:', results);
+    }
+  } catch (fetchError) {
+    console.error('Ошибка при получении данных из Redis:', fetchError);
+    errorMessage = `Ошибка Redis: ${fetchError.message}`;
+  }
+
+  let adminHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Результати всіх користувачів</title>
+        <style>
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid black; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+          .error { color: red; }
+          .answers { white-space: pre-wrap; max-width: 300px; overflow-wrap: break-word; }
+        </style>
+      </head>
+      <body>
+        <h1>Результати всіх користувачів</h1>
+  `;
+  if (errorMessage) {
+    adminHtml += `<p class="error">${errorMessage}</p>`;
+  }
+  adminHtml += `
+        <table>
+          <tr>
+            <th>Користувач</th>
+            <th>Тест</th>
+            <th>Очки</th>
+            <th>Максимум</th>
+            <th>Початок</th>
+            <th>Кінець</th>
+            <th>Тривалість (сек)</th>
+            <th>Відповіді та бали</th>
+          </tr>
+  `;
+  if (!results || results.length === 0) {
+    adminHtml += '<tr><td colspan="8">Немає результатів</td></tr>';
+    console.log('No results found in test_results');
+  } else {
+    results.forEach((result, index) => {
+      try {
+        const r = JSON.parse(result);
+        console.log(`Parsed result ${index}:`, r);
+        const answersDisplay = r.answers 
+          ? Object.entries(r.answers).map(([q, a], i) => 
+              `Питання ${parseInt(q) + 1}: ${Array.isArray(a) ? a.join(', ') : a} (${r.scoresPerQuestion[i] || 0} балів)`
+            ).join('\n')
+          : 'Немає відповідей';
+        adminHtml += `
+          <tr>
+            <td>${r.user || 'N/A'}</td>
+            <td>${r.testNumber || 'N/A'}</td>
+            <td>${r.score || '0'}</td>
+            <td>${r.totalPoints || '0'}</td>
+            <td>${r.startTime || 'N/A'}</td>
+            <td>${r.endTime || 'N/A'}</td>
+            <td>${r.duration || 'N/A'}</td>
+            <td class="answers">${answersDisplay}</td>
+          </tr>
+        `;
+      } catch (parseError) {
+        console.error(`Ошибка парсинга результата ${index}:`, parseError, 'Raw data:', result);
+      }
+    });
+  }
+  adminHtml += `
+        </table>
+        <button onclick="window.location.href='/'">Повернутися на головну</button>
+      </body>
+    </html>
+  `;
+  res.send(adminHtml);
+});
+2. Увеличение шрифта и фиксация кнопок в /test/question
+Обновим маршрут /test/question:
+
+Увеличим шрифт в два раза с помощью CSS (font-size: 32px, если базовый шрифт браузера 16px).
+Зафиксируем кнопки внизу с помощью position: fixed и добавим цвета.
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+app.get('/test/question', checkAuth, (req, res) => {
+  if (req.user === 'admin') return res.redirect('/admin/results');
+  const userTest = userTests.get(req.user);
+  if (!userTest) return res.status(400).send('Тест не розпочато');
+
+  const { questions, testNumber } = userTest;
+  const index = parseInt(req.query.index) || 0;
+
+  if (index < 0 || index >= questions.length) {
+    return res.status(400).send('Невірний номер питання');
+  }
+
+  userTest.currentQuestion = index;
+  const q = questions[index];
+  console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
+  let html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Тест ${testNumber}</title>
+        <style>
+          body { font-size: 32px; margin: 0; padding: 20px; padding-bottom: 80px; }
+          img { max-width: 300px; }
+          .button-container { 
+            position: fixed; 
+            bottom: 20px; 
+            left: 20px; 
+            right: 20px; 
+            display: flex; 
+            justify-content: space-between; 
+          }
+          button { 
+            font-size: 32px; 
+            padding: 10px 20px; 
+            border: none; 
+            cursor: pointer; 
+          }
+          .back-btn { background-color: red; color: white; }
+          .next-btn { background-color: blue; color: white; }
+          .finish-btn { background-color: green; color: white; }
+          button:disabled { background-color: grey; cursor: not-allowed; }
+        </style>
+      </head>
+      <body>
+        <h1>Тест ${testNumber}</h1>
+        <div>
+  `;
+  if (q.picture) {
+    html += `<img src="${q.picture}" alt="Picture" onerror="this.src='/images/placeholder.png'; console.log('Image failed to load: ${q.picture}')"><br>`;
+  }
+  html += `
+          <p>${index + 1}. ${q.text}</p>
+  `;
+  if (!q.options || q.options.length === 0) {
+    const userAnswer = userTest.answers[index] || '';
+    html += `
+      <input type="text" name="q${index}" id="q${index}_input" value="${userAnswer}" placeholder="Введіть відповідь"><br>
+    `;
+  } else {
+    q.options.forEach((option, optIndex) => {
+      const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
+      html += `
+        <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
+        <label for="q${index}_${optIndex}">${option}</label><br>
+      `;
+    });
+  }
+  html += `
+        </div>
+        <div class="button-container">
+          <button class="back-btn" ${index === 0 ? 'disabled' : ''} onclick="window.location.href='/test/question?index=${index - 1}'">Назад</button>
+          <button class="next-btn" ${index === questions.length - 1 ? 'disabled' : ''} onclick="saveAndNext(${index})">Вперед</button>
+          <button class="finish-btn" onclick="finishTest(${index})">Завершити тест</button>
+        </div>
+        <script>
+          async function saveAndNext(index) {
+            let answers;
+            if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
+              answers = document.getElementById('q' + index + '_input').value;
+            } else {
+              const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
+              answers = Array.from(checked).map(input => input.value);
+            }
+            await fetch('/answer', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ index, answer: answers })
+            });
+            window.location.href = '/test/question?index=' + (index + 1);
+          }
+          async function finishTest(index) {
+            let answers;
+            if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
+              answers = document.getElementById('q' + index + '_input').value;
+            } else {
+              const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
+              answers = Array.from(checked).map(input => input.value);
+            }
+            await fetch('/answer', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ index, answer: answers })
+            });
+            window.location.href = '/result';
+          }
+        </script>
+      </body>
+    </html>
+  `;
+  res.send(html);
+});
+Полный server.js
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const path = require('path');
@@ -155,6 +467,27 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
 
     const userTest = userTests.get(user);
     const answers = userTest ? userTest.answers : {};
+    const questions = userTest ? userTest.questions : [];
+    const scoresPerQuestion = questions.map((q, index) => {
+      const userAnswer = answers[index];
+      let questionScore = 0;
+      if (!q.options || q.options.length === 0) {
+        if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
+          questionScore = q.points;
+        }
+      } else {
+        if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+          const correctAnswers = q.correctAnswers.map(String);
+          const userAnswers = userAnswer.map(String);
+          if (correctAnswers.length === userAnswers.length && 
+              correctAnswers.every(val => userAnswers.includes(val)) && 
+              userAnswers.every(val => correctAnswers.includes(val))) {
+            questionScore = q.points;
+          }
+        }
+      }
+      return questionScore;
+    });
 
     const duration = Math.round((endTime - startTime) / 1000);
     const result = {
@@ -165,7 +498,8 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       startTime: new Date(startTime).toISOString(),
       endTime: new Date(endTime).toISOString(),
       duration,
-      answers
+      answers,
+      scoresPerQuestion
     };
     console.log('Saving result to Redis:', result);
     await redisClient.lPush('test_results', JSON.stringify(result));
@@ -216,13 +550,35 @@ app.get('/test/question', checkAuth, (req, res) => {
       <head>
         <meta charset="UTF-8">
         <title>Тест ${testNumber}</title>
+        <style>
+          body { font-size: 32px; margin: 0; padding: 20px; padding-bottom: 80px; }
+          img { max-width: 300px; }
+          .button-container { 
+            position: fixed; 
+            bottom: 20px; 
+            left: 20px; 
+            right: 20px; 
+            display: flex; 
+            justify-content: space-between; 
+          }
+          button { 
+            font-size: 32px; 
+            padding: 10px 20px; 
+            border: none; 
+            cursor: pointer; 
+          }
+          .back-btn { background-color: red; color: white; }
+          .next-btn { background-color: blue; color: white; }
+          .finish-btn { background-color: green; color: white; }
+          button:disabled { background-color: grey; cursor: not-allowed; }
+        </style>
       </head>
       <body>
         <h1>Тест ${testNumber}</h1>
         <div>
   `;
   if (q.picture) {
-    html += `<img src="${q.picture}" alt="Picture" style="max-width: 300px;" onerror="this.src='/images/placeholder.png'; console.log('Image failed to load: ${q.picture}')"><br>`;
+    html += `<img src="${q.picture}" alt="Picture" onerror="this.src='/images/placeholder.png'; console.log('Image failed to load: ${q.picture}')"><br>`;
   }
   html += `
           <p>${index + 1}. ${q.text}</p>
@@ -242,10 +598,12 @@ app.get('/test/question', checkAuth, (req, res) => {
     });
   }
   html += `
-        </div><br>
-        <button ${index === 0 ? 'disabled' : ''} onclick="window.location.href='/test/question?index=${index - 1}'">Назад</button>
-        <button ${index === questions.length - 1 ? 'disabled' : ''} onclick="saveAndNext(${index})">Вперед</button>
-        <button onclick="finishTest(${index})">Завершити тест</button>
+        </div>
+        <div class="button-container">
+          <button class="back-btn" ${index === 0 ? 'disabled' : ''} onclick="window.location.href='/test/question?index=${index - 1}'">Назад</button>
+          <button class="next-btn" ${index === questions.length - 1 ? 'disabled' : ''} onclick="saveAndNext(${index})">Вперед</button>
+          <button class="finish-btn" onclick="finishTest(${index})">Завершити тест</button>
+        </div>
         <script>
           async function saveAndNext(index) {
             let answers;
@@ -454,7 +812,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
             <th>Початок</th>
             <th>Кінець</th>
             <th>Тривалість (сек)</th>
-            <th>Відповіді</th>
+            <th>Відповіді та бали</th>
           </tr>
   `;
   if (!results || results.length === 0) {
@@ -466,7 +824,9 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
         const r = JSON.parse(result);
         console.log(`Parsed result ${index}:`, r);
         const answersDisplay = r.answers 
-          ? Object.entries(r.answers).map(([q, a]) => `Питання ${parseInt(q) + 1}: ${Array.isArray(a) ? a.join(', ') : a}`).join('\n')
+          ? Object.entries(r.answers).map(([q, a], i) => 
+              `Питання ${parseInt(q) + 1}: ${Array.isArray(a) ? a.join(', ') : a} (${r.scoresPerQuestion[i] || 0} балів)`
+            ).join('\n')
           : 'Немає відповідей';
         adminHtml += `
           <tr>
