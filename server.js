@@ -299,6 +299,7 @@ app.get('/test/question', checkAuth, (req, res) => {
         <style>
           body { font-size: 32px; margin: 0; padding: 20px; padding-bottom: 80px; }
           img { max-width: 300px; }
+          .option-box { border: 2px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px; }
           .button-container { 
             position: fixed; 
             bottom: 20px; 
@@ -338,8 +339,10 @@ app.get('/test/question', checkAuth, (req, res) => {
     q.options.forEach((option, optIndex) => {
       const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
       html += `
-        <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
-        <label for="q${index}_${optIndex}">${option}</label><br>
+        <div class="option-box">
+          <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
+          <label for="q${index}_${optIndex}">${option}</label>
+        </div>
       `;
     });
   }
@@ -505,7 +508,6 @@ app.get('/results', checkAuth, async (req, res) => {
   res.send(resultsHtml);
 });
 
-// Страница администратора
 app.get('/admin', checkAuth, checkAdmin, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -533,7 +535,6 @@ app.get('/admin', checkAuth, checkAdmin, (req, res) => {
   `);
 });
 
-// Просмотр результатов
 app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
   let results = [];
   let errorMessage = '';
@@ -603,14 +604,19 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
               `Питання ${parseInt(q) + 1}: ${Array.isArray(a) ? a.join(', ') : a} (${r.scoresPerQuestion[i] || 0} балів)`
             ).join('\n')
           : 'Немає відповідей';
+        const formatDateTime = (isoString) => {
+          if (!isoString) return 'N/A';
+          const date = new Date(isoString);
+          return `${date.toLocaleTimeString('uk-UA', { hour12: false })} ${date.toLocaleDateString('uk-UA')}`;
+        };
         adminHtml += `
           <tr>
             <td>${r.user || 'N/A'}</td>
             <td>${testNames[r.testNumber] || 'N/A'}</td>
             <td>${r.score || '0'}</td>
             <td>${r.totalPoints || '0'}</td>
-            <td>${r.startTime || 'N/A'}</td>
-            <td>${r.endTime || 'N/A'}</td>
+            <td>${formatDateTime(r.startTime)}</td>
+            <td>${formatDateTime(r.endTime)}</td>
             <td>${r.duration || 'N/A'}</td>
             <td class="answers">${answersDisplay}</td>
           </tr>
@@ -628,7 +634,6 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
   res.send(adminHtml);
 });
 
-// Удаление результатов
 app.get('/admin/delete-results', checkAuth, checkAdmin, async (req, res) => {
   try {
     if (!redisClient.isOpen) {
@@ -655,7 +660,6 @@ app.get('/admin/delete-results', checkAuth, checkAdmin, async (req, res) => {
   }
 });
 
-// Редактирование названий тестов
 app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -713,10 +717,10 @@ app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
   }
 });
 
-// Создание нового теста
 app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
   // Получаем список файлов Excel в директории
   const excelFiles = fs.readdirSync(__dirname).filter(file => file.endsWith('.xlsx') && file.startsWith('questions'));
+  console.log('Available Excel files:', excelFiles); // Для отладки
   res.send(`
     <!DOCTYPE html>
     <html>
