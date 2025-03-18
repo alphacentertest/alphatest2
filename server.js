@@ -123,6 +123,32 @@ redisClient.on('error', (err) => console.error('Redis Client Error:', err));
 redisClient.on('connect', () => console.log('Redis connected'));
 redisClient.on('reconnecting', () => console.log('Redis reconnecting'));
 
+// Инициализация с повторными попытками
+const initializeServer = async (attempt = 1, maxAttempts = 5) => {
+  try {
+    console.log(`Starting server initialization (Attempt ${attempt} of ${maxAttempts})...`);
+    validPasswords = await loadUsers();
+    console.log('Users loaded successfully:', validPasswords);
+    await redisClient.connect();
+    console.log('Connected to Redis and loaded users');
+    isInitialized = true;
+    initializationError = null;
+  } catch (err) {
+    console.error(`Failed to initialize server (Attempt ${attempt}):`, err.message, err.stack);
+    initializationError = err;
+    if (attempt < maxAttempts) {
+      console.log(`Retrying initialization in 5 seconds...`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      await initializeServer(attempt + 1, maxAttempts);
+    } else {
+      console.error('Maximum initialization attempts reached. Server remains uninitialized.');
+    }
+  }
+};
+
+// Запуск инициализации при старте
+initializeServer().catch(err => console.error('Initialization failed on startup:', err));
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -783,19 +809,5 @@ app.post('/admin/create-test', checkAuth, checkAdmin, async (req, res) => {
     res.status(500).send(`Помилка при створенні тесту: ${error.message}`);
   }
 });
-
-(async () => {
-  try {
-    console.log('Starting server initialization...');
-    validPasswords = await loadUsers();
-    console.log('Users loaded successfully:', validPasswords);
-    await redisClient.connect();
-    console.log('Connected to Redis and loaded users');
-    isInitialized = true;
-  } catch (err) {
-    console.error('Failed to initialize server:', err.message, err.stack);
-    initializationError = err;
-  }
-})();
 
 module.exports = app;
