@@ -10,7 +10,10 @@ const app = express();
 let validPasswords = {};
 let isInitialized = false;
 let initializationError = null;
-let testNames = { '1': 'Тест 1', '2': 'Тест 2' }; // Храним названия тестов
+let testNames = { 
+  '1': { name: 'Тест 1', timeLimit: 3600 }, // По умолчанию 1 час (3600 секунд)
+  '2': { name: 'Тест 2', timeLimit: 3600 }  // По умолчанию 1 час
+}; // Храним названия и время тестов
 
 const loadUsers = async () => {
   try {
@@ -122,7 +125,6 @@ redisClient.on('error', (err) => console.error('Redis Client Error:', err));
 redisClient.on('connect', () => console.log('Redis connected'));
 redisClient.on('reconnecting', () => console.log('Redis reconnecting'));
 
-// Инициализация с ожиданием
 const initializeServer = async () => {
   let attempt = 1;
   const maxAttempts = 5;
@@ -151,10 +153,9 @@ const initializeServer = async () => {
   }
 };
 
-// Запуск инициализации перед маршрутами
 (async () => {
   await initializeServer();
-  app.use(ensureInitialized); // Применяем middleware только после инициализации
+  app.use(ensureInitialized);
 })();
 
 app.get('/', (req, res) => {
@@ -219,8 +220,8 @@ app.get('/select-test', checkAuth, (req, res) => {
       </head>
       <body>
         <h1>Виберіть тест</h1>
-        ${Object.entries(testNames).map(([num, name]) => `
-          <button onclick="window.location.href='/test?test=${num}'">${name}</button>
+        ${Object.entries(testNames).map(([num, data]) => `
+          <button onclick="window.location.href='/test?test=${num}'">${data.name}</button>
         `).join('')}
       </body>
     </html>
@@ -300,7 +301,8 @@ app.get('/test', checkAuth, async (req, res) => {
       questions,
       answers: {},
       currentQuestion: 0,
-      startTime: Date.now()
+      startTime: Date.now(),
+      timeLimit: testNames[testNumber].timeLimit * 1000 // В миллисекундах
     });
     res.redirect(`/test/question?index=0`);
   } catch (error) {
@@ -314,7 +316,7 @@ app.get('/test/question', checkAuth, (req, res) => {
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).send('Тест не розпочато');
 
-  const { questions, testNumber } = userTest;
+  const { questions, testNumber, answers, currentQuestion, startTime, timeLimit } = userTest;
   const index = parseInt(req.query.index) || 0;
 
   if (index < 0 || index >= questions.length) {
@@ -324,38 +326,44 @@ app.get('/test/question', checkAuth, (req, res) => {
   userTest.currentQuestion = index;
   const q = questions[index];
   console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
+
+  // Прогресс для индикатора
+  const progress = Array.from({ length: questions.length }, (_, i) => ({
+    number: i + 1,
+    answered: !!answers[i]
+  }));
+
   let html = `
     <!DOCTYPE html>
     <html>
       <head>
         <meta charset="UTF-8">
-        <title>${testNames[userTest.testNumber]}</title>
+        <title>${testNames[testNumber].name}</title>
         <style>
           body { font-size: 32px; margin: 0; padding: 20px; padding-bottom: 80px; }
           img { max-width: 300px; }
           .option-box { border: 2px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px; }
-          .button-container { 
-            position: fixed; 
-            bottom: 20px; 
-            left: 20px; 
-            right: 20px; 
-            display: flex; 
-            justify-content: space-between; 
-          }
-          button { 
-            font-size: 32px; 
-            padding: 10px 20px; 
-            border: none; 
-            cursor: pointer; 
-          }
+          .progress-bar { display: flex; justify-content: space-between; margin-bottom: 20px; }
+          .progress-circle { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 5px; }
+          .progress-circle.unanswered { background-color: red; color: white; }
+          .progress-circle.answered { background-color: green; color: white; }
+          .button-container { position: fixed; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; }
+          button { font-size: 32px; padding: 10px 20px; border: none; cursor: pointer; }
           .back-btn { background-color: red; color: white; }
           .next-btn { background-color: blue; color: white; }
           .finish-btn { background-color: green; color: white; }
           button:disabled { background-color: grey; cursor: not-allowed; }
+          #timer { font-size: 24px; margin-bottom: 20px; }
         </style>
       </head>
       <body>
-        <h1>${testNames[userTest.testNumber]}</h1>
+        <h1>${testNames[testNumber].name}</h1>
+        <div id="timer">Залишилося часу: <span id="time-left">${Math.floor(timeLimit / 1000)}</span> сек</div>
+        <div class="progress-bar">
+          ${progress.map(p => `
+            <div class="progress-circle ${p.answered ? 'answered' : 'unanswered'}">${p.number}</div>
+          `).join('')}
+        </div>
         <div>
   `;
   if (q.picture) {
@@ -365,13 +373,13 @@ app.get('/test/question', checkAuth, (req, res) => {
           <p>${index + 1}. ${q.text}</p>
   `;
   if (!q.options || q.options.length === 0) {
-    const userAnswer = userTest.answers[index] || '';
+    const userAnswer = answers[index] || '';
     html += `
       <input type="text" name="q${index}" id="q${index}_input" value="${userAnswer}" placeholder="Введіть відповідь"><br>
     `;
   } else {
     q.options.forEach((option, optIndex) => {
-      const checked = userTest.answers[index]?.includes(option) ? 'checked' : '';
+      const checked = answers[index]?.includes(option) ? 'checked' : '';
       html += `
         <div class="option-box">
           <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
@@ -388,6 +396,17 @@ app.get('/test/question', checkAuth, (req, res) => {
           <button class="finish-btn" onclick="finishTest(${index})">Завершити тест</button>
         </div>
         <script>
+          let timeLeft = ${timeLimit / 1000};
+          const timerElement = document.getElementById('time-left');
+          const timer = setInterval(() => {
+            timeLeft--;
+            timerElement.textContent = timeLeft;
+            if (timeLeft <= 0) {
+              clearInterval(timer);
+              window.location.href = '/result';
+            }
+          }, 1000);
+
           async function saveAndNext(index) {
             let answers;
             if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
@@ -416,6 +435,7 @@ app.get('/test/question', checkAuth, (req, res) => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ index, answer: answers })
             });
+            clearInterval(timer);
             window.location.href = '/result';
           }
         </script>
@@ -475,10 +495,10 @@ app.get('/result', checkAuth, async (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
-        <title>Результати ${testNames[testNumber]}</title>
+        <title>Результати ${testNames[testNumber].name}</title>
       </head>
       <body>
-        <h1>Результати ${testNames[testNumber]}</h1>
+        <h1>Результати ${testNames[testNumber].name}</h1>
         <p>Ваш результат: ${score} з ${totalPoints}</p>
         <button onclick="window.location.href='/results'">Переглянути результати</button>
         <button onclick="window.location.href='/'">Повернутися на головну</button>
@@ -527,7 +547,7 @@ app.get('/results', checkAuth, async (req, res) => {
     });
     const duration = Math.round((Date.now() - startTime) / 1000);
     resultsHtml += `
-      <p>${testNames[testNumber]}: ${score} з ${totalPoints}, тривалість: ${duration} сек</p>
+      <p>${testNames[testNumber].name}: ${score} з ${totalPoints}, тривалість: ${duration} сек</p>
     `;
     userTests.delete(req.user);
   } else {
@@ -646,7 +666,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
         adminHtml += `
           <tr>
             <td>${r.user || 'N/A'}</td>
-            <td>${testNames[r.testNumber] || 'N/A'}</td>
+            <td>${testNames[r.testNumber]?.name || 'N/A'}</td>
             <td>${r.score || '0'}</td>
             <td>${r.totalPoints || '0'}</td>
             <td>${formatDateTime(r.startTime)}</td>
@@ -708,15 +728,19 @@ app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
         </style>
       </head>
       <body>
-        <h1>Редагувати назви тестів</h1>
+        <h1>Редагувати назви та час тестів</h1>
         <form method="POST" action="/admin/edit-tests">
           <div>
             <label for="test1">Назва Тесту 1:</label>
-            <input type="text" id="test1" name="test1" value="${testNames['1']}" required>
+            <input type="text" id="test1" name="test1" value="${testNames['1'].name}" required>
+            <label for="time1">Час (сек):</label>
+            <input type="number" id="time1" name="time1" value="${testNames['1'].timeLimit}" required min="1">
           </div>
           <div>
             <label for="test2">Назва Тесту 2:</label>
-            <input type="text" id="test2" name="test2" value="${testNames['2']}" required>
+            <input type="text" id="test2" name="test2" value="${testNames['2'].name}" required>
+            <label for="time2">Час (сек):</label>
+            <input type="number" id="time2" name="time2" value="${testNames['2'].timeLimit}" required min="1">
           </div>
           <button type="submit">Зберегти</button>
         </form>
@@ -728,10 +752,16 @@ app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
 
 app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
   try {
-    const { test1, test2 } = req.body;
-    testNames['1'] = test1 || testNames['1'];
-    testNames['2'] = test2 || testNames['2'];
-    console.log('Updated test names:', testNames);
+    const { test1, test2, time1, time2 } = req.body;
+    testNames['1'] = {
+      name: test1 || testNames['1'].name,
+      timeLimit: parseInt(time1) || testNames['1'].timeLimit
+    };
+    testNames['2'] = {
+      name: test2 || testNames['2'].name,
+      timeLimit: parseInt(time2) || testNames['2'].timeLimit
+    };
+    console.log('Updated test names and time limits:', testNames);
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -740,7 +770,7 @@ app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
           <title>Назви оновлено</title>
         </head>
         <body>
-          <h1>Назви тестів успішно оновлено</h1>
+          <h1>Назви та час тестів успішно оновлено</h1>
           <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
         </body>
       </html>
@@ -752,9 +782,8 @@ app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
 });
 
 app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
-  // Получаем список файлов Excel в директории
   const excelFiles = fs.readdirSync(__dirname).filter(file => file.endsWith('.xlsx') && file.startsWith('questions'));
-  console.log('Available Excel files:', excelFiles); // Для отладки
+  console.log('Available Excel files:', excelFiles);
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -776,6 +805,10 @@ app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
             <input type="text" id="testName" name="testName" required>
           </div>
           <div>
+            <label for="timeLimit">Час (сек):</label>
+            <input type="number" id="timeLimit" name="timeLimit" value="3600" required min="1">
+          </div>
+          <div>
             <label for="excelFile">Оберіть файл Excel з питаннями:</label>
             <select id="excelFile" name="excelFile" required>
               ${excelFiles.map(file => `<option value="${file}">${file}</option>`).join('')}
@@ -791,14 +824,17 @@ app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
 
 app.post('/admin/create-test', checkAuth, checkAdmin, async (req, res) => {
   try {
-    const { testName, excelFile } = req.body;
+    const { testName, excelFile, timeLimit } = req.body;
     const match = excelFile.match(/^questions(\d+)\.xlsx$/);
     if (!match) throw new Error('Невірний формат файлу Excel');
     const testNumber = match[1];
     if (testNames[testNumber]) throw new Error('Тест з таким номером вже існує');
 
-    testNames[testNumber] = testName;
-    console.log('Created new test:', { testNumber, testName, excelFile });
+    testNames[testNumber] = {
+      name: testName,
+      timeLimit: parseInt(timeLimit) || 3600
+    };
+    console.log('Created new test:', { testNumber, testName, timeLimit, excelFile });
     res.send(`
       <!DOCTYPE html>
       <html>
