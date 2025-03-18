@@ -10,6 +10,7 @@ const app = express();
 let validPasswords = {};
 let isInitialized = false;
 let initializationError = null;
+let testNames = { '1': 'Тест 1', '2': 'Тест 2' }; // Храним названия тестов
 
 const loadUsers = async () => {
   try {
@@ -59,7 +60,41 @@ const loadUsers = async () => {
   }
 };
 
-// Middleware для проверки инициализации
+const loadQuestions = async (testNumber) => {
+  try {
+    const filePath = path.join(__dirname, `questions${testNumber}.xlsx`);
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File questions${testNumber}.xlsx not found at path: ${filePath}`);
+    }
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const jsonData = [];
+    const sheet = workbook.getWorksheet('Questions');
+
+    if (!sheet) throw new Error(`Лист "Questions" не знайдено в questions${testNumber}.xlsx`);
+
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber > 1) {
+        const rowValues = row.values.slice(1);
+        const picture = String(rowValues[0] || '').trim();
+        const questionText = String(rowValues[1] || '').trim();
+        jsonData.push({
+          picture: picture.match(/^Picture (\d+)/i) ? `/images/Picture ${picture.match(/^Picture (\d+)/i)[1]}.png` : null,
+          text: questionText,
+          options: rowValues.slice(2, 8).filter(Boolean),
+          correctAnswers: rowValues.slice(8, 11).filter(Boolean),
+          type: rowValues[11] || 'multiple',
+          points: Number(rowValues[12]) || 0
+        });
+      }
+    });
+    return jsonData;
+  } catch (error) {
+    console.error(`Ошибка в loadQuestions (test ${testNumber}):`, error.stack);
+    throw error;
+  }
+};
+
 const ensureInitialized = (req, res, next) => {
   if (!isInitialized) {
     if (initializationError) {
@@ -76,12 +111,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
 app.use(ensureInitialized);
 
-// Настройка Redis
 const redisClient = createClient({
   url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808',
   socket: {
-    connectTimeout: 10000, // Таймаут на подключение 10 секунд
-    reconnectStrategy: (retries) => Math.min(retries * 500, 3000) // Повторная попытка через 500мс, максимум 3с
+    connectTimeout: 10000,
+    reconnectStrategy: (retries) => Math.min(retries * 500, 3000)
   }
 });
 
@@ -109,7 +143,7 @@ app.post('/login', async (req, res) => {
     });
 
     if (user === 'admin') {
-      res.json({ success: true, redirect: '/admin/results' });
+      res.json({ success: true, redirect: '/admin' });
     } else {
       res.json({ success: true, redirect: '/select-test' });
     }
@@ -141,7 +175,7 @@ const checkAdmin = (req, res, next) => {
 };
 
 app.get('/select-test', checkAuth, (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin/results');
+  if (req.user === 'admin') return res.redirect('/admin');
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -151,44 +185,13 @@ app.get('/select-test', checkAuth, (req, res) => {
       </head>
       <body>
         <h1>Виберіть тест</h1>
-        <button onclick="window.location.href='/test?test=1'">Почати Тест 1</button>
-        <button onclick="window.location.href='/test?test=2'">Почати Тест 2</button>
+        ${Object.entries(testNames).map(([num, name]) => `
+          <button onclick="window.location.href='/test?test=${num}'">${name}</button>
+        `).join('')}
       </body>
     </html>
   `);
 });
-
-const loadQuestions = async (testNumber) => {
-  try {
-    const workbook = new ExcelJS.Workbook();
-    const filePath = path.join(__dirname, `questions${testNumber}.xlsx`);
-    await workbook.xlsx.readFile(filePath);
-    const jsonData = [];
-    const sheet = workbook.getWorksheet('Questions');
-
-    if (!sheet) throw new Error(`Лист "Questions" не знайдено в questions${testNumber}.xlsx`);
-
-    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber > 1) {
-        const rowValues = row.values.slice(1);
-        const picture = String(rowValues[0] || '').trim();
-        const questionText = String(rowValues[1] || '').trim();
-        jsonData.push({
-          picture: picture.match(/^Picture (\d+)/i) ? `/images/Picture ${picture.match(/^Picture (\d+)/i)[1]}.png` : null,
-          text: questionText,
-          options: rowValues.slice(2, 8).filter(Boolean),
-          correctAnswers: rowValues.slice(8, 11).filter(Boolean),
-          type: rowValues[11] || 'multiple',
-          points: Number(rowValues[12]) || 0
-        });
-      }
-    });
-    return jsonData;
-  } catch (error) {
-    console.error(`Ошибка в loadQuestions (test ${testNumber}):`, error.stack);
-    throw error;
-  }
-};
 
 const userTests = new Map();
 
@@ -253,8 +256,9 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
 };
 
 app.get('/test', checkAuth, async (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin/results');
-  const testNumber = req.query.test === '2' ? 2 : 1;
+  if (req.user === 'admin') return res.redirect('/admin');
+  const testNumber = req.query.test;
+  if (!testNames[testNumber]) return res.status(404).send('Тест не знайдено');
   try {
     const questions = await loadQuestions(testNumber);
     userTests.set(req.user, {
@@ -272,7 +276,7 @@ app.get('/test', checkAuth, async (req, res) => {
 });
 
 app.get('/test/question', checkAuth, (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin/results');
+  if (req.user === 'admin') return res.redirect('/admin');
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).send('Тест не розпочато');
 
@@ -291,7 +295,7 @@ app.get('/test/question', checkAuth, (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
-        <title>Тест ${testNumber}</title>
+        <title>${testNames[userTest.testNumber]}</title>
         <style>
           body { font-size: 32px; margin: 0; padding: 20px; padding-bottom: 80px; }
           img { max-width: 300px; }
@@ -316,7 +320,7 @@ app.get('/test/question', checkAuth, (req, res) => {
         </style>
       </head>
       <body>
-        <h1>Тест ${testNumber}</h1>
+        <h1>${testNames[userTest.testNumber]}</h1>
         <div>
   `;
   if (q.picture) {
@@ -385,7 +389,7 @@ app.get('/test/question', checkAuth, (req, res) => {
 });
 
 app.post('/answer', checkAuth, (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin/results');
+  if (req.user === 'admin') return res.redirect('/admin');
   try {
     const { index, answer } = req.body;
     const userTest = userTests.get(req.user);
@@ -399,7 +403,7 @@ app.post('/answer', checkAuth, (req, res) => {
 });
 
 app.get('/result', checkAuth, async (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin/results');
+  if (req.user === 'admin') return res.redirect('/admin');
   const userTest = userTests.get(req.user);
   if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
 
@@ -434,10 +438,10 @@ app.get('/result', checkAuth, async (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
-        <title>Результати Тесту ${testNumber}</title>
+        <title>Результати ${testNames[testNumber]}</title>
       </head>
       <body>
-        <h1>Результати Тесту ${testNumber}</h1>
+        <h1>Результати ${testNames[testNumber]}</h1>
         <p>Ваш результат: ${score} з ${totalPoints}</p>
         <button onclick="window.location.href='/results'">Переглянути результати</button>
         <button onclick="window.location.href='/'">Повернутися на головну</button>
@@ -448,7 +452,7 @@ app.get('/result', checkAuth, async (req, res) => {
 });
 
 app.get('/results', checkAuth, async (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin/results');
+  if (req.user === 'admin') return res.redirect('/admin');
   const userTest = userTests.get(req.user);
   let resultsHtml = `
     <!DOCTYPE html>
@@ -486,7 +490,7 @@ app.get('/results', checkAuth, async (req, res) => {
     });
     const duration = Math.round((Date.now() - startTime) / 1000);
     resultsHtml += `
-      <p>Тест ${testNumber}: ${score} з ${totalPoints}, тривалість: ${duration} сек</p>
+      <p>${testNames[testNumber]}: ${score} з ${totalPoints}, тривалість: ${duration} сек</p>
     `;
     userTests.delete(req.user);
   } else {
@@ -501,6 +505,35 @@ app.get('/results', checkAuth, async (req, res) => {
   res.send(resultsHtml);
 });
 
+// Страница администратора
+app.get('/admin', checkAuth, checkAdmin, (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Адмін-панель</title>
+        <style>
+          body { font-size: 24px; margin: 20px; }
+          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+          table { border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid black; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+        </style>
+      </head>
+      <body>
+        <h1>Адмін-панель</h1>
+        <button onclick="window.location.href='/admin/results'">Переглянути результати</button>
+        <button onclick="window.location.href='/admin/delete-results'">Видалити результати</button>
+        <button onclick="window.location.href='/admin/edit-tests'">Редагувати назви тестів</button>
+        <button onclick="window.location.href='/admin/create-test'">Створити новий тест</button>
+        <button onclick="window.location.href='/'">Повернутися на головну</button>
+      </body>
+    </html>
+  `);
+});
+
+// Просмотр результатов
 app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
   let results = [];
   let errorMessage = '';
@@ -573,7 +606,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
         adminHtml += `
           <tr>
             <td>${r.user || 'N/A'}</td>
-            <td>${r.testNumber || 'N/A'}</td>
+            <td>${testNames[r.testNumber] || 'N/A'}</td>
             <td>${r.score || '0'}</td>
             <td>${r.totalPoints || '0'}</td>
             <td>${r.startTime || 'N/A'}</td>
@@ -588,15 +621,165 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
     });
   }
   adminHtml += `
-        </table>
-        <button onclick="window.location.href='/'">Повернутися на головну</button>
+        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
       </body>
     </html>
   `;
   res.send(adminHtml);
 });
 
-// Инициализация перед запуском
+// Удаление результатов
+app.get('/admin/delete-results', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    if (!redisClient.isOpen) {
+      await redisClient.connect();
+    }
+    await redisClient.del('test_results');
+    console.log('Test results deleted from Redis');
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Видалено результати</title>
+        </head>
+        <body>
+          <h1>Результати успішно видалено</h1>
+          <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Ошибка при удалении результатов:', error.stack);
+    res.status(500).send('Помилка при видаленні результатів');
+  }
+});
+
+// Редактирование названий тестов
+app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Редагувати назви тестів</title>
+        <style>
+          body { font-size: 24px; margin: 20px; }
+          input { font-size: 24px; padding: 5px; margin: 5px; }
+          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+        </style>
+      </head>
+      <body>
+        <h1>Редагувати назви тестів</h1>
+        <form method="POST" action="/admin/edit-tests">
+          <div>
+            <label for="test1">Назва Тесту 1:</label>
+            <input type="text" id="test1" name="test1" value="${testNames['1']}" required>
+          </div>
+          <div>
+            <label for="test2">Назва Тесту 2:</label>
+            <input type="text" id="test2" name="test2" value="${testNames['2']}" required>
+          </div>
+          <button type="submit">Зберегти</button>
+        </form>
+        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
+      </body>
+    </html>
+  `);
+});
+
+app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
+  try {
+    const { test1, test2 } = req.body;
+    testNames['1'] = test1 || testNames['1'];
+    testNames['2'] = test2 || testNames['2'];
+    console.log('Updated test names:', testNames);
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Назви оновлено</title>
+        </head>
+        <body>
+          <h1>Назви тестів успішно оновлено</h1>
+          <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Ошибка при редактировании названий тестов:', error.stack);
+    res.status(500).send('Помилка при оновленні назв тестів');
+  }
+});
+
+// Создание нового теста
+app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
+  // Получаем список файлов Excel в директории
+  const excelFiles = fs.readdirSync(__dirname).filter(file => file.endsWith('.xlsx') && file.startsWith('questions'));
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Створити новий тест</title>
+        <style>
+          body { font-size: 24px; margin: 20px; }
+          input { font-size: 24px; padding: 5px; margin: 5px; }
+          select { font-size: 24px; padding: 5px; margin: 5px; }
+          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+        </style>
+      </head>
+      <body>
+        <h1>Створити новий тест</h1>
+        <form method="POST" action="/admin/create-test">
+          <div>
+            <label for="testName">Назва нового тесту:</label>
+            <input type="text" id="testName" name="testName" required>
+          </div>
+          <div>
+            <label for="excelFile">Оберіть файл Excel з питаннями:</label>
+            <select id="excelFile" name="excelFile" required>
+              ${excelFiles.map(file => `<option value="${file}">${file}</option>`).join('')}
+            </select>
+          </div>
+          <button type="submit">Створити</button>
+        </form>
+        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
+      </body>
+    </html>
+  `);
+});
+
+app.post('/admin/create-test', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const { testName, excelFile } = req.body;
+    const match = excelFile.match(/^questions(\d+)\.xlsx$/);
+    if (!match) throw new Error('Невірний формат файлу Excel');
+    const testNumber = match[1];
+    if (testNames[testNumber]) throw new Error('Тест з таким номером вже існує');
+
+    testNames[testNumber] = testName;
+    console.log('Created new test:', { testNumber, testName, excelFile });
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Тест створено</title>
+        </head>
+        <body>
+          <h1>Новий тест "${testName}" створено</h1>
+          <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Ошибка при создании нового теста:', error.stack);
+    res.status(500).send(`Помилка при створенні тесту: ${error.message}`);
+  }
+});
+
 (async () => {
   try {
     console.log('Starting server initialization...');
@@ -608,9 +791,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
   } catch (err) {
     console.error('Failed to initialize server:', err.message, err.stack);
     initializationError = err;
-    // Не завершаем процесс, чтобы Vercel не перезапускал сервер бесконечно
   }
 })();
 
-// Экспорт для Vercel
 module.exports = app;
