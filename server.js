@@ -1,3 +1,17 @@
+Спасибо за обратную связь! Давайте внесем изменения согласно вашим пожеланиям:
+
+Таймер: Запускать таймер с начала теста и не сбрасывать его при ответах. Формат таймера изменен на 00 мм 00 с.
+Подсветка выбранного ответа: Подсвечивать весь бокс с ответом зеленым, если он выбран.
+Контекстное меню при завершении теста: Добавим подтверждение с вопросом "Ви дійсно бажаєте завершити тест?" и вариантами "Так" и "Ні".
+Индикатор с линией: Соединим кружочки линией, которая будет менять цвет на зеленый в зависимости от ответа.
+Обновленный server.js
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const path = require('path');
@@ -333,6 +347,12 @@ app.get('/test/question', checkAuth, (req, res) => {
     answered: !!answers[i]
   }));
 
+  // Оставшееся время в секундах
+  const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+  const remainingTime = Math.max(0, Math.floor(timeLimit / 1000) - elapsedTime);
+  const minutes = Math.floor(remainingTime / 60).toString().padStart(2, '0');
+  const seconds = (remainingTime % 60).toString().padStart(2, '0');
+
   let html = `
     <!DOCTYPE html>
     <html>
@@ -343,10 +363,13 @@ app.get('/test/question', checkAuth, (req, res) => {
           body { font-size: 32px; margin: 0; padding: 20px; padding-bottom: 80px; }
           img { max-width: 300px; }
           .option-box { border: 2px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px; }
-          .progress-bar { display: flex; justify-content: space-between; margin-bottom: 20px; }
+          .progress-bar { display: flex; align-items: center; margin-bottom: 20px; }
+          .progress-line { flex-grow: 1; height: 2px; background-color: #ccc; }
           .progress-circle { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 5px; }
           .progress-circle.unanswered { background-color: red; color: white; }
           .progress-circle.answered { background-color: green; color: white; }
+          .progress-line.answered { background-color: green; }
+          .option-box.selected { background-color: #90ee90; } /* Зеленая подсветка выбранного ответа */
           .button-container { position: fixed; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; }
           button { font-size: 32px; padding: 10px 20px; border: none; cursor: pointer; }
           .back-btn { background-color: red; color: white; }
@@ -354,14 +377,17 @@ app.get('/test/question', checkAuth, (req, res) => {
           .finish-btn { background-color: green; color: white; }
           button:disabled { background-color: grey; cursor: not-allowed; }
           #timer { font-size: 24px; margin-bottom: 20px; }
+          #confirm-modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 2px solid black; z-index: 1000; }
+          #confirm-modal button { margin: 0 10px; }
         </style>
       </head>
       <body>
         <h1>${testNames[testNumber].name}</h1>
-        <div id="timer">Залишилося часу: <span id="time-left">${Math.floor(timeLimit / 1000)}</span> сек</div>
+        <div id="timer">Залишилося часу: ${minutes} мм ${seconds} с</div>
         <div class="progress-bar">
-          ${progress.map(p => `
+          ${progress.map((p, i) => `
             <div class="progress-circle ${p.answered ? 'answered' : 'unanswered'}">${p.number}</div>
+            ${i < progress.length - 1 ? '<div class="progress-line ' + (p.answered ? 'answered' : '') + '"></div>' : ''}
           `).join('')}
         </div>
         <div>
@@ -381,7 +407,7 @@ app.get('/test/question', checkAuth, (req, res) => {
     q.options.forEach((option, optIndex) => {
       const checked = answers[index]?.includes(option) ? 'checked' : '';
       html += `
-        <div class="option-box">
+        <div class="option-box ${checked ? 'selected' : ''}">
           <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
           <label for="q${index}_${optIndex}">${option}</label>
         </div>
@@ -393,19 +419,29 @@ app.get('/test/question', checkAuth, (req, res) => {
         <div class="button-container">
           <button class="back-btn" ${index === 0 ? 'disabled' : ''} onclick="window.location.href='/test/question?index=${index - 1}'">Назад</button>
           <button class="next-btn" ${index === questions.length - 1 ? 'disabled' : ''} onclick="saveAndNext(${index})">Вперед</button>
-          <button class="finish-btn" onclick="finishTest(${index})">Завершити тест</button>
+          <button class="finish-btn" onclick="showConfirm(${index})">Завершити тест</button>
+        </div>
+        <div id="confirm-modal">
+          <h2>Ви дійсно бажаєте завершити тест?</h2>
+          <button onclick="finishTest(${index})">Так</button>
+          <button onclick="hideConfirm()">Ні</button>
         </div>
         <script>
-          let timeLeft = ${timeLimit / 1000};
-          const timerElement = document.getElementById('time-left');
-          const timer = setInterval(() => {
-            timeLeft--;
-            timerElement.textContent = timeLeft;
-            if (timeLeft <= 0) {
-              clearInterval(timer);
+          let startTime = ${startTime};
+          let timeLimit = ${timeLimit};
+          const timerElement = document.getElementById('timer');
+          function updateTimer() {
+            const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+            const remainingTime = Math.max(0, Math.floor(timeLimit / 1000) - elapsedTime);
+            const minutes = Math.floor(remainingTime / 60).toString().padStart(2, '0');
+            const seconds = (remainingTime % 60).toString().padStart(2, '0');
+            timerElement.textContent = 'Залишилося часу: ' + minutes + ' мм ' + seconds + ' с';
+            if (remainingTime <= 0) {
               window.location.href = '/result';
             }
-          }, 1000);
+          }
+          updateTimer();
+          setInterval(updateTimer, 1000);
 
           async function saveAndNext(index) {
             let answers;
@@ -422,6 +458,15 @@ app.get('/test/question', checkAuth, (req, res) => {
             });
             window.location.href = '/test/question?index=' + (index + 1);
           }
+
+          function showConfirm(index) {
+            document.getElementById('confirm-modal').style.display = 'block';
+          }
+
+          function hideConfirm() {
+            document.getElementById('confirm-modal').style.display = 'none';
+          }
+
           async function finishTest(index) {
             let answers;
             if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
@@ -435,7 +480,7 @@ app.get('/test/question', checkAuth, (req, res) => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ index, answer: answers })
             });
-            clearInterval(timer);
+            hideConfirm();
             window.location.href = '/result';
           }
         </script>
