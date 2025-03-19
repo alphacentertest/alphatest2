@@ -176,7 +176,7 @@ app.get('/', (req, res) => {
           .password-container { position: relative; display: inline-block; }
           .eye-icon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: 24px; }
           .checkbox-container { font-size: 24px; margin: 10px 0; }
-          @media (max-width: 768px) {
+          @media (max-width: 1024px) {
             body { font-size: 48px; }
             input[type="password"], input[type="text"] { font-size: 48px; padding: 15px; width: 400px; }
             button { font-size: 48px; padding: 15px 30px; }
@@ -254,7 +254,7 @@ app.post('/login', async (req, res) => {
 
     if (rememberMe) {
       res.cookie('savedPassword', password, {
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 дней
+        maxAge: 30 * 24 * 60 * 60 * 1000,
         httpOnly: false,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax'
@@ -307,7 +307,7 @@ app.get('/select-test', checkAuth, (req, res) => {
         <style>
           body { font-size: 32px; margin: 20px; text-align: center; }
           button { font-size: 32px; padding: 10px 20px; margin: 10px; }
-          @media (max-width: 768px) {
+          @media (max-width: 1024px) {
             body { font-size: 48px; }
             button { font-size: 48px; padding: 15px 30px; margin: 15px; }
           }
@@ -475,9 +475,10 @@ app.get('/test/question', checkAuth, (req, res) => {
           #timer { font-size: 24px; margin-bottom: 20px; }
           #confirm-modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 2px solid black; z-index: 1000; }
           #confirm-modal button { margin: 0 10px; }
-          .sortable { cursor: move; }
+          .sortable { cursor: move; touch-action: none; }
           .sortable.dragging { opacity: 0.5; }
-          @media (max-width: 768px) {
+          .instruction { font-style: italic; font-size: 24px; margin-top: 5px; color: #555; }
+          @media (max-width: 1024px) {
             body { font-size: 48px; }
             img { max-width: 400px; }
             .option-box { padding: 15px; margin: 10px 0; }
@@ -490,6 +491,7 @@ app.get('/test/question', checkAuth, (req, res) => {
             #confirm-modal button { font-size: 48px; padding: 15px 30px; }
             input[type="text"] { font-size: 48px; padding: 15px; width: 100%; box-sizing: border-box; }
             label { font-size: 48px; }
+            .instruction { font-size: 36px; }
           }
         </style>
       </head>
@@ -516,10 +518,10 @@ app.get('/test/question', checkAuth, (req, res) => {
       <input type="text" name="q${index}" id="q${index}_input" value="${userAnswer}" placeholder="Введіть відповідь"><br>
     `;
   } else if (q.type === 'ordering') {
-    const orderedOptions = answers[index] || q.options;
     html += `
+      <p class="instruction">Розмістіть відповіді у правильній послідовності</p>
       <div id="sortable-${index}" class="sortable-list">
-        ${orderedOptions.map((option, optIndex) => `
+        ${(answers[index] || q.options).map((option, optIndex) => `
           <div class="option-box sortable" draggable="true" data-index="${optIndex}" data-value="${option}">
             ${option}
           </div>
@@ -527,15 +529,18 @@ app.get('/test/question', checkAuth, (req, res) => {
       </div>
     `;
   } else {
-    q.options.forEach((option, optIndex) => {
-      const checked = answers[index]?.includes(option) ? 'checked' : '';
-      html += `
-        <div class="option-box ${checked ? 'selected' : ''}">
-          <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
-          <label for="q${index}_${optIndex}">${option}</label>
-        </div>
-      `;
-    });
+    html += `
+      <p class="instruction">Виберіть всі правильні відповіді</p>
+      ${q.options.map((option, optIndex) => {
+        const checked = answers[index]?.includes(option) ? 'checked' : '';
+        return `
+          <div class="option-box ${checked ? 'selected' : ''}">
+            <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
+            <label for="q${index}_${optIndex}">${option}</label>
+          </div>
+        `;
+      }).join('')}
+    `;
   }
   html += `
         </div>
@@ -568,25 +573,61 @@ app.get('/test/question', checkAuth, (req, res) => {
 
           const sortableList = document.getElementById('sortable-${index}');
           if (sortableList) {
+            let draggedItem = null;
+            let touchStartY = 0;
+            let touchStartTime = 0;
+
             const items = sortableList.querySelectorAll('.sortable');
+
+            // Десктоп: Drag-and-Drop
             items.forEach(item => {
-              item.addEventListener('dragstart', () => {
+              item.addEventListener('dragstart', (e) => {
+                draggedItem = item;
                 item.classList.add('dragging');
               });
               item.addEventListener('dragend', () => {
-                item.classList.remove('dragging');
+                draggedItem.classList.remove('dragging');
+                draggedItem = null;
               });
             });
+
             sortableList.addEventListener('dragover', (e) => {
               e.preventDefault();
-              const dragging = sortableList.querySelector('.dragging');
               const afterElement = getDragAfterElement(sortableList, e.clientY);
               if (afterElement == null) {
-                sortableList.appendChild(dragging);
+                sortableList.appendChild(draggedItem);
               } else {
-                sortableList.insertBefore(dragging, afterElement);
+                sortableList.insertBefore(draggedItem, afterElement);
               }
             });
+
+            // Мобильные устройства: Touch Events
+            items.forEach(item => {
+              item.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                draggedItem = item;
+                touchStartY = e.touches[0].clientY;
+                touchStartTime = Date.now();
+                item.classList.add('dragging');
+              });
+
+              item.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const touchY = e.touches[0].clientY;
+                const afterElement = getDragAfterElement(sortableList, touchY);
+                if (afterElement == null) {
+                  sortableList.appendChild(draggedItem);
+                } else {
+                  sortableList.insertBefore(draggedItem, afterElement);
+                }
+              });
+
+              item.addEventListener('touchend', () => {
+                draggedItem.classList.remove('dragging');
+                draggedItem = null;
+              });
+            });
+
             function getDragAfterElement(container, y) {
               const sortableElements = [...container.querySelectorAll('.sortable:not(.dragging)')];
               return sortableElements.reduce((closest, child) => {
@@ -714,7 +755,7 @@ app.get('/result', checkAuth, async (req, res) => {
         <style>
           body { font-size: 32px; margin: 20px; text-align: center; }
           button { font-size: 32px; padding: 10px 20px; margin: 10px; }
-          @media (max-width: 768px) {
+          @media (max-width: 1024px) {
             body { font-size: 48px; }
             button { font-size: 48px; padding: 15px 30px; margin: 15px; }
           }
@@ -744,7 +785,7 @@ app.get('/results', checkAuth, async (req, res) => {
         <style>
           body { font-size: 32px; margin: 20px; text-align: center; }
           button { font-size: 32px; padding: 10px 20px; margin: 10px; }
-          @media (max-width: 768px) {
+          @media (max-width: 1024px) {
             body { font-size: 48px; }
             button { font-size: 48px; padding: 15px 30px; margin: 15px; }
           }
@@ -813,7 +854,7 @@ app.get('/admin', checkAuth, checkAdmin, (req, res) => {
           table { border-collapse: collapse; margin-top: 20px; }
           th, td { border: 1px solid black; padding: 8px; text-align: left; }
           th { background-color: #f2f2f2; }
-          @media (max-width: 768px) {
+          @media (max-width: 1024px) {
             body { font-size: 36px; }
             button { font-size: 36px; padding: 15px 30px; margin: 10px; }
             th, td { font-size: 36px; padding: 12px; }
@@ -870,7 +911,7 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
           .error { color: red; }
           .answers { white-space: pre-wrap; max-width: 300px; overflow-wrap: break-word; line-height: 1.8; }
           button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-          @media (max-width: 768px) {
+          @media (max-width: 1024px) {
             body { font-size: 36px; }
             th, td { font-size: 36px; padding: 12px; }
             .answers { max-width: 400px; font-size: 36px; }
@@ -957,7 +998,7 @@ app.get('/admin/delete-results', checkAuth, checkAdmin, async (req, res) => {
           <style>
             body { font-size: 24px; margin: 20px; text-align: center; }
             button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-            @media (max-width: 768px) {
+            @media (max-width: 1024px) {
               body { font-size: 36px; }
               button { font-size: 36px; padding: 15px 30px; margin: 10px; }
             }
@@ -988,7 +1029,7 @@ app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
           input { font-size: 24px; padding: 5px; margin: 5px; }
           button { font-size: 24px; padding: 10px 20px; margin: 5px; }
           label { font-size: 24px; }
-          @media (max-width: 768px) {
+          @media (max-width: 1024px) {
             body { font-size: 36px; }
             input { font-size: 36px; padding: 10px; margin: 10px; width: 100%; box-sizing: border-box; }
             button { font-size: 36px; padding: 15px 30px; margin: 10px; }
@@ -999,18 +1040,14 @@ app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
       <body>
         <h1>Редагувати назви та час тестів</h1>
         <form method="POST" action="/admin/edit-tests">
-          <div>
-            <label for="test1">Назва Тесту 1:</label>
-            <input type="text" id="test1" name="test1" value="${testNames['1'].name}" required>
-            <label for="time1">Час (сек):</label>
-            <input type="number" id="time1" name="time1" value="${testNames['1'].timeLimit}" required min="1">
-          </div>
-          <div>
-            <label for="test2">Назва Тесту 2:</label>
-            <input type="text" id="test2" name="test2" value="${testNames['2'].name}" required>
-            <label for="time2">Час (сек):</label>
-            <input type="number" id="time2" name="time2" value="${testNames['2'].timeLimit}" required min="1">
-          </div>
+          ${Object.entries(testNames).map(([testNum, testData]) => `
+            <div>
+              <label for="test${testNum}">Назва Тесту ${testNum}:</label>
+              <input type="text" id="test${testNum}" name="test${testNum}" value="${testData.name}" required>
+              <label for="time${testNum}">Час (сек):</label>
+              <input type="number" id="time${testNum}" name="time${testNum}" value="${testData.timeLimit}" required min="1">
+            </div>
+          `).join('')}
           <button type="submit">Зберегти</button>
         </form>
         <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
@@ -1021,15 +1058,16 @@ app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
 
 app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
   try {
-    const { test1, test2, time1, time2 } = req.body;
-    testNames['1'] = {
-      name: test1 || testNames['1'].name,
-      timeLimit: parseInt(time1) || testNames['1'].timeLimit
-    };
-    testNames['2'] = {
-      name: test2 || testNames['2'].name,
-      timeLimit: parseInt(time2) || testNames['2'].timeLimit
-    };
+    Object.keys(testNames).forEach(testNum => {
+      const testName = req.body[`test${testNum}`];
+      const timeLimit = req.body[`time${testNum}`];
+      if (testName && timeLimit) {
+        testNames[testNum] = {
+          name: testName,
+          timeLimit: parseInt(timeLimit) || testNames[testNum].timeLimit
+        };
+      }
+    });
     console.log('Updated test names and time limits:', testNames);
     res.send(`
       <!DOCTYPE html>
@@ -1041,7 +1079,7 @@ app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
           <style>
             body { font-size: 24px; margin: 20px; text-align: center; }
             button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-            @media (max-width: 768px) {
+            @media (max-width: 1024px) {
               body { font-size: 36px; }
               button { font-size: 36px; padding: 15px 30px; margin: 10px; }
             }
@@ -1075,7 +1113,7 @@ app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
           select { font-size: 24px; padding: 5px; margin: 5px; }
           button { font-size: 24px; padding: 10px 20px; margin: 5px; }
           label { font-size: 24px; }
-          @media (max-width: 768px) {
+          @media (max-width: 1024px) {
             body { font-size: 36px; }
             input { font-size: 36px; padding: 10px; margin: 10px; width: 100%; box-sizing: border-box; }
             select { font-size: 36px; padding: 10px; margin: 10px; width: 100%; }
@@ -1132,7 +1170,7 @@ app.post('/admin/create-test', checkAuth, checkAdmin, async (req, res) => {
           <style>
             body { font-size: 24px; margin: 20px; text-align: center; }
             button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-            @media (max-width: 768px) {
+            @media (max-width: 1024px) {
               body { font-size: 36px; }
               button { font-size: 36px; padding: 15px 30px; margin: 10px; }
             }
