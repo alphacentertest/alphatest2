@@ -11,9 +11,9 @@ let validPasswords = {};
 let isInitialized = false;
 let initializationError = null;
 let testNames = { 
-  '1': { name: 'Тест 1', timeLimit: 3600 }, // По умолчанию 1 час (3600 секунд)
-  '2': { name: 'Тест 2', timeLimit: 3600 }  // По умолчанию 1 час
-}; // Храним названия и время тестов
+  '1': { name: 'Тест 1', timeLimit: 3600 },
+  '2': { name: 'Тест 2', timeLimit: 3600 }
+};
 
 const loadUsers = async () => {
   try {
@@ -81,13 +81,18 @@ const loadQuestions = async (testNumber) => {
         const rowValues = row.values.slice(1);
         const picture = String(rowValues[0] || '').trim();
         const questionText = String(rowValues[1] || '').trim();
+        const options = rowValues.slice(2, 12).filter(Boolean); // Столбцы C-L (Option1-Option10)
+        const correctAnswers = rowValues.slice(12, 17).filter(Boolean); // Столбцы M-Q (Correct1-Correct5)
+        const type = String(rowValues[17] || '').trim().toLowerCase() || 'multiple'; // Столбец R (Type)
+        const points = Number(rowValues[18]) || 0; // Столбец S (Points)
+
         jsonData.push({
           picture: picture.match(/^Picture (\d+)/i) ? `/images/Picture ${picture.match(/^Picture (\d+)/i)[1]}.png` : null,
           text: questionText,
-          options: rowValues.slice(2, 8).filter(Boolean),
-          correctAnswers: rowValues.slice(8, 11).filter(Boolean),
-          type: rowValues[11] || 'multiple',
-          points: Number(rowValues[12]) || 0
+          options,
+          correctAnswers,
+          type,
+          points
         });
       }
     });
@@ -255,15 +260,20 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
         if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
           questionScore = q.points;
         }
-      } else {
-        if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
-          const correctAnswers = q.correctAnswers.map(String);
-          const userAnswers = userAnswer.map(String);
-          if (correctAnswers.length === userAnswers.length && 
-              correctAnswers.every(val => userAnswers.includes(val)) && 
-              userAnswers.every(val => correctAnswers.includes(val))) {
+      } else if (q.type === 'ordering') {
+        if (userAnswer && userAnswer.length === q.correctAnswers.length) {
+          const isCorrect = userAnswer.every((answer, i) => String(answer).trim() === String(q.correctAnswers[i]).trim());
+          if (isCorrect) {
             questionScore = q.points;
           }
+        }
+      } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+        const correctAnswers = q.correctAnswers.map(String);
+        const userAnswers = userAnswer.map(String);
+        if (correctAnswers.length === userAnswers.length && 
+            correctAnswers.every(val => userAnswers.includes(val)) && 
+            userAnswers.every(val => correctAnswers.includes(val))) {
+          questionScore = q.points;
         }
       }
       return questionScore;
@@ -302,7 +312,7 @@ app.get('/test', checkAuth, async (req, res) => {
       answers: {},
       currentQuestion: 0,
       startTime: Date.now(),
-      timeLimit: testNames[testNumber].timeLimit * 1000 // В миллисекундах
+      timeLimit: testNames[testNumber].timeLimit * 1000
     });
     res.redirect(`/test/question?index=0`);
   } catch (error) {
@@ -327,13 +337,11 @@ app.get('/test/question', checkAuth, (req, res) => {
   const q = questions[index];
   console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
 
-  // Прогресс для индикатора
   const progress = Array.from({ length: questions.length }, (_, i) => ({
     number: i + 1,
     answered: !!answers[i]
   }));
 
-  // Оставшееся время в секундах
   const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
   const remainingTime = Math.max(0, Math.floor(timeLimit / 1000) - elapsedTime);
   const minutes = Math.floor(remainingTime / 60).toString().padStart(2, '0');
@@ -355,7 +363,7 @@ app.get('/test/question', checkAuth, (req, res) => {
           .progress-circle.unanswered { background-color: red; color: white; }
           .progress-circle.answered { background-color: green; color: white; }
           .progress-line.answered { background-color: green; }
-          .option-box.selected { background-color: #90ee90; } /* Зеленая подсветка выбранного ответа */
+          .option-box.selected { background-color: #90ee90; }
           .button-container { position: fixed; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; }
           button { font-size: 32px; padding: 10px 20px; border: none; cursor: pointer; }
           .back-btn { background-color: red; color: white; }
@@ -365,6 +373,8 @@ app.get('/test/question', checkAuth, (req, res) => {
           #timer { font-size: 24px; margin-bottom: 20px; }
           #confirm-modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 2px solid black; z-index: 1000; }
           #confirm-modal button { margin: 0 10px; }
+          .sortable { list-style-type: none; padding: 0; }
+          .sortable li { border: 2px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px; cursor: move; }
         </style>
       </head>
       <body>
@@ -388,6 +398,15 @@ app.get('/test/question', checkAuth, (req, res) => {
     const userAnswer = answers[index] || '';
     html += `
       <input type="text" name="q${index}" id="q${index}_input" value="${userAnswer}" placeholder="Введіть відповідь"><br>
+    `;
+  } else if (q.type === 'ordering') {
+    const userOrder = answers[index] || q.options;
+    html += `
+      <ul class="sortable" id="sortable-${index}">
+        ${userOrder.map((option, optIndex) => `
+          <li data-id="${optIndex}">${option}</li>
+        `).join('')}
+      </ul>
     `;
   } else {
     q.options.forEach((option, optIndex) => {
@@ -429,10 +448,61 @@ app.get('/test/question', checkAuth, (req, res) => {
           updateTimer();
           setInterval(updateTimer, 1000);
 
+          // Drag-and-Drop для ordering
+          const sortableList = document.getElementById('sortable-${index}');
+          if (sortableList) {
+            let draggedItem = null;
+            sortableList.addEventListener('dragstart', (e) => {
+              draggedItem = e.target;
+              setTimeout(() => {
+                e.target.style.display = 'none';
+              }, 0);
+            });
+            sortableList.addEventListener('dragend', (e) => {
+              setTimeout(() => {
+                draggedItem.style.display = 'block';
+                draggedItem = null;
+              }, 0);
+            });
+            sortableList.addEventListener('dragover', (e) => {
+              e.preventDefault();
+            });
+            sortableList.addEventListener('dragenter', (e) => {
+              e.preventDefault();
+              if (e.target.tagName === 'LI') {
+                e.target.style.border = '2px dashed #000';
+              }
+            });
+            sortableList.addEventListener('dragleave', (e) => {
+              if (e.target.tagName === 'LI') {
+                e.target.style.border = '2px solid #ccc';
+              }
+            });
+            sortableList.addEventListener('drop', (e) => {
+              e.preventDefault();
+              if (e.target.tagName === 'LI') {
+                e.target.style.border = '2px solid #ccc';
+                if (draggedItem !== e.target) {
+                  const allItems = [...sortableList.querySelectorAll('li')];
+                  const draggedIndex = allItems.indexOf(draggedItem);
+                  const targetIndex = allItems.indexOf(e.target);
+                  if (draggedIndex < targetIndex) {
+                    e.target.after(draggedItem);
+                  } else {
+                    e.target.before(draggedItem);
+                  }
+                }
+              }
+            });
+          }
+
           async function saveAndNext(index) {
             let answers;
             if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
               answers = document.getElementById('q' + index + '_input').value;
+            } else if (document.getElementById('sortable-' + index)) {
+              const items = document.querySelectorAll('#sortable-' + index + ' li');
+              answers = Array.from(items).map(item => item.textContent);
             } else {
               const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
               answers = Array.from(checked).map(input => input.value);
@@ -457,6 +527,9 @@ app.get('/test/question', checkAuth, (req, res) => {
             let answers;
             if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
               answers = document.getElementById('q' + index + '_input').value;
+            } else if (document.getElementById('sortable-' + index)) {
+              const items = document.querySelectorAll('#sortable-' + index + ' li');
+              answers = Array.from(items).map(item => item.textContent);
             } else {
               const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
               answers = Array.from(checked).map(input => input.value);
@@ -505,15 +578,20 @@ app.get('/result', checkAuth, async (req, res) => {
       if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
         score += q.points;
       }
-    } else {
-      if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
-        const correctAnswers = q.correctAnswers.map(String);
-        const userAnswers = userAnswer.map(String);
-        if (correctAnswers.length === userAnswers.length && 
-            correctAnswers.every(val => userAnswers.includes(val)) && 
-            userAnswers.every(val => correctAnswers.includes(val))) {
+    } else if (q.type === 'ordering') {
+      if (userAnswer && userAnswer.length === q.correctAnswers.length) {
+        const isCorrect = userAnswer.every((answer, i) => String(answer).trim() === String(q.correctAnswers[i]).trim());
+        if (isCorrect) {
           score += q.points;
         }
+      }
+    } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+      const correctAnswers = q.correctAnswers.map(String);
+      const userAnswers = userAnswer.map(String);
+      if (correctAnswers.length === userAnswers.length && 
+          correctAnswers.every(val => userAnswers.includes(val)) && 
+          userAnswers.every(val => correctAnswers.includes(val))) {
+        score += q.points;
       }
     }
   });
@@ -564,15 +642,20 @@ app.get('/results', checkAuth, async (req, res) => {
         if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
           score += q.points;
         }
-      } else {
-        if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
-          const correctAnswers = q.correctAnswers.map(String);
-          const userAnswers = userAnswer.map(String);
-          if (correctAnswers.length === userAnswers.length && 
-              correctAnswers.every(val => userAnswers.includes(val)) && 
-              userAnswers.every(val => correctAnswers.includes(val))) {
+      } else if (q.type === 'ordering') {
+        if (userAnswer && userAnswer.length === q.correctAnswers.length) {
+          const isCorrect = userAnswer.every((answer, i) => String(answer).trim() === String(q.correctAnswers[i]).trim());
+          if (isCorrect) {
             score += q.points;
           }
+        }
+      } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+        const correctAnswers = q.correctAnswers.map(String);
+        const userAnswers = userAnswer.map(String);
+        if (correctAnswers.length === userAnswers.length && 
+            correctAnswers.every(val => userAnswers.includes(val)) && 
+            userAnswers.every(val => correctAnswers.includes(val))) {
+          score += q.points;
         }
       }
     });
@@ -743,42 +826,6 @@ app.get('/admin/delete-results', checkAuth, checkAdmin, async (req, res) => {
     console.error('Ошибка при удалении результатов:', error.stack);
     res.status(500).send('Помилка при видаленні результатів');
   }
-});
-
-app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Редагувати назви тестів</title>
-        <style>
-          body { font-size: 24px; margin: 20px; }
-          input { font-size: 24px; padding: 5px; margin: 5px; }
-          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-        </style>
-      </head>
-      <body>
-        <h1>Редагувати назви та час тестів</h1>
-        <form method="POST" action="/admin/edit-tests">
-          <div>
-            <label for="test1">Назва Тесту 1:</label>
-            <input type="text" id="test1" name="test1" value="${testNames['1'].name}" required>
-            <label for="time1">Час (сек):</label>
-            <input type="number" id="time1" name="time1" value="${testNames['1'].timeLimit}" required min="1">
-          </div>
-          <div>
-            <label for="test2">Назва Тесту 2:</label>
-            <input type="text" id="test2" name="test2" value="${testNames['2'].name}" required>
-            <label for="time2">Час (сек):</label>
-            <input type="number" id="time2" name="time2" value="${testNames['2'].timeLimit}" required min="1">
-          </div>
-          <button type="submit">Зберегти</button>
-        </form>
-        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-      </body>
-    </html>
-  `);
 });
 
 app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
