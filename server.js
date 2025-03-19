@@ -84,10 +84,10 @@ const loadQuestions = async (testNumber) => {
         jsonData.push({
           picture: picture.match(/^Picture (\d+)/i) ? `/images/Picture ${picture.match(/^Picture (\d+)/i)[1]}.png` : null,
           text: questionText,
-          options: rowValues.slice(2, 14).filter(Boolean), // Option 1–12 (столбцы 3–14)
-          correctAnswers: rowValues.slice(14, 26).filter(Boolean), // Correct Answer 1–12 (столбцы 15–26)
-          type: rowValues[26] || 'multiple', // Тип вопроса (столбец 27)
-          points: Number(rowValues[27]) || 0 // Баллы (столбец 28)
+          options: rowValues.slice(2, 14).filter(Boolean),
+          correctAnswers: rowValues.slice(14, 26).filter(Boolean),
+          type: rowValues[26] || 'multiple',
+          points: Number(rowValues[27]) || 0
         });
       }
     });
@@ -159,12 +159,87 @@ const initializeServer = async () => {
 })();
 
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  const savedPassword = req.cookies.savedPassword || '';
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Вхід</title>
+        <style>
+          body { font-size: 32px; margin: 20px; display: flex; justify-content: center; align-items: center; height: 100vh; }
+          .login-container { text-align: center; }
+          input[type="password"], input[type="text"] { font-size: 32px; padding: 10px; margin: 10px 0; width: 300px; }
+          button { font-size: 32px; padding: 10px 20px; margin: 10px 0; }
+          .error { color: red; }
+          .password-container { position: relative; display: inline-block; }
+          .eye-icon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: 24px; }
+          .checkbox-container { font-size: 24px; margin: 10px 0; }
+          @media (max-width: 768px) {
+            body { font-size: 48px; }
+            input[type="password"], input[type="text"] { font-size: 48px; padding: 15px; width: 400px; }
+            button { font-size: 48px; padding: 15px 30px; }
+            .eye-icon { font-size: 36px; right: 15px; }
+            .checkbox-container { font-size: 36px; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="login-container">
+          <h1>Введіть пароль</h1>
+          <form id="loginForm" method="POST" action="/login">
+            <div class="password-container">
+              <input type="password" id="password" name="password" value="${savedPassword}" required>
+              <span class="eye-icon" onclick="togglePassword()">👁️</span>
+            </div>
+            <div class="checkbox-container">
+              <input type="checkbox" id="rememberMe" name="rememberMe">
+              <label for="rememberMe">Запомнить меня</label>
+            </div>
+            <button type="submit">Увійти</button>
+          </form>
+          <p id="error" class="error"></p>
+        </div>
+        <script>
+          async function login(event) {
+            event.preventDefault();
+            const password = document.getElementById('password').value;
+            const rememberMe = document.getElementById('rememberMe').checked;
+            const response = await fetch('/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password, rememberMe })
+            });
+            const result = await response.json();
+            if (result.success) {
+              window.location.href = result.redirect;
+            } else {
+              document.getElementById('error').textContent = result.message;
+            }
+          }
+          document.getElementById('loginForm').addEventListener('submit', login);
+
+          function togglePassword() {
+            const passwordInput = document.getElementById('password');
+            const eyeIcon = document.querySelector('.eye-icon');
+            if (passwordInput.type === 'password') {
+              passwordInput.type = 'text';
+              eyeIcon.textContent = '👁️‍🗨️';
+            } else {
+              passwordInput.type = 'password';
+              eyeIcon.textContent = '👁️';
+            }
+          }
+        </script>
+      </body>
+    </html>
+  `);
 });
 
 app.post('/login', async (req, res) => {
   try {
-    const { password } = req.body;
+    const { password, rememberMe } = req.body;
     if (!password) return res.status(400).json({ success: false, message: 'Пароль не вказано' });
     console.log('Checking password:', password, 'against validPasswords:', validPasswords);
     const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
@@ -176,6 +251,17 @@ app.post('/login', async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax'
     });
+
+    if (rememberMe) {
+      res.cookie('savedPassword', password, {
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 дней
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax'
+      });
+    } else {
+      res.clearCookie('savedPassword');
+    }
 
     if (user === 'admin') {
       res.json({ success: true, redirect: '/admin' });
@@ -216,7 +302,16 @@ app.get('/select-test', checkAuth, (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Вибір тесту</title>
+        <style>
+          body { font-size: 32px; margin: 20px; text-align: center; }
+          button { font-size: 32px; padding: 10px 20px; margin: 10px; }
+          @media (max-width: 768px) {
+            body { font-size: 48px; }
+            button { font-size: 48px; padding: 15px 30px; margin: 15px; }
+          }
+        </style>
       </head>
       <body>
         <h1>Виберіть тест</h1>
@@ -332,10 +427,21 @@ app.get('/test/question', checkAuth, (req, res) => {
   const q = questions[index];
   console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
 
-  const progress = Array.from({ length: questions.length }, (_, i) => ({
-    number: i + 1,
-    answered: !!answers[i]
-  }));
+  const progress = Array.from({ length: questions.length }, (_, i) => {
+    const answer = answers[i];
+    let isAnswered = false;
+    if (answer) {
+      if (Array.isArray(answer)) {
+        isAnswered = answer.length > 0;
+      } else {
+        isAnswered = String(answer).trim() !== '';
+      }
+    }
+    return {
+      number: i + 1,
+      answered: isAnswered
+    };
+  });
 
   const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
   const remainingTime = Math.max(0, Math.floor(timeLimit / 1000) - elapsedTime);
@@ -347,6 +453,7 @@ app.get('/test/question', checkAuth, (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>${testNames[testNumber].name}</title>
         <style>
           body { font-size: 32px; margin: 0; padding: 20px; padding-bottom: 80px; }
@@ -354,7 +461,7 @@ app.get('/test/question', checkAuth, (req, res) => {
           .option-box { border: 2px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px; }
           .progress-bar { display: flex; align-items: center; margin-bottom: 20px; }
           .progress-line { flex-grow: 1; height: 2px; background-color: #ccc; }
-          .progress-circle { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 5px; }
+          .progress-circle { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 5px; font-size: 20px; }
           .progress-circle.unanswered { background-color: red; color: white; }
           .progress-circle.answered { background-color: green; color: white; }
           .progress-line.answered { background-color: green; }
@@ -370,6 +477,20 @@ app.get('/test/question', checkAuth, (req, res) => {
           #confirm-modal button { margin: 0 10px; }
           .sortable { cursor: move; }
           .sortable.dragging { opacity: 0.5; }
+          @media (max-width: 768px) {
+            body { font-size: 48px; }
+            img { max-width: 400px; }
+            .option-box { padding: 15px; margin: 10px 0; }
+            .progress-circle { width: 50px; height: 50px; font-size: 30px; margin: 0 10px; }
+            .progress-line { height: 4px; }
+            button { font-size: 48px; padding: 15px 30px; }
+            #timer { font-size: 36px; }
+            #confirm-modal { padding: 30px; }
+            #confirm-modal h2 { font-size: 48px; }
+            #confirm-modal button { font-size: 48px; padding: 15px 30px; }
+            input[type="text"] { font-size: 48px; padding: 15px; width: 100%; box-sizing: border-box; }
+            label { font-size: 48px; }
+          }
         </style>
       </head>
       <body>
@@ -588,7 +709,16 @@ app.get('/result', checkAuth, async (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Результати ${testNames[testNumber].name}</title>
+        <style>
+          body { font-size: 32px; margin: 20px; text-align: center; }
+          button { font-size: 32px; padding: 10px 20px; margin: 10px; }
+          @media (max-width: 768px) {
+            body { font-size: 48px; }
+            button { font-size: 48px; padding: 15px 30px; margin: 15px; }
+          }
+        </style>
       </head>
       <body>
         <h1>Результати ${testNames[testNumber].name}</h1>
@@ -609,7 +739,16 @@ app.get('/results', checkAuth, async (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Результати</title>
+        <style>
+          body { font-size: 32px; margin: 20px; text-align: center; }
+          button { font-size: 32px; padding: 10px 20px; margin: 10px; }
+          @media (max-width: 768px) {
+            body { font-size: 48px; }
+            button { font-size: 48px; padding: 15px 30px; margin: 15px; }
+          }
+        </style>
       </head>
       <body>
         <h1>Результати</h1>
@@ -666,6 +805,7 @@ app.get('/admin', checkAuth, checkAdmin, (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Адмін-панель</title>
         <style>
           body { font-size: 24px; margin: 20px; }
@@ -673,6 +813,11 @@ app.get('/admin', checkAuth, checkAdmin, (req, res) => {
           table { border-collapse: collapse; margin-top: 20px; }
           th, td { border: 1px solid black; padding: 8px; text-align: left; }
           th { background-color: #f2f2f2; }
+          @media (max-width: 768px) {
+            body { font-size: 36px; }
+            button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+            th, td { font-size: 36px; padding: 12px; }
+          }
         </style>
       </head>
       <body>
@@ -715,13 +860,22 @@ app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Результати всіх користувачів</title>
         <style>
+          body { font-size: 24px; margin: 20px; }
           table { border-collapse: collapse; width: 100%; }
           th, td { border: 1px solid black; padding: 8px; text-align: left; }
           th { background-color: #f2f2f2; }
           .error { color: red; }
           .answers { white-space: pre-wrap; max-width: 300px; overflow-wrap: break-word; line-height: 1.8; }
+          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+          @media (max-width: 768px) {
+            body { font-size: 36px; }
+            th, td { font-size: 36px; padding: 12px; }
+            .answers { max-width: 400px; font-size: 36px; }
+            button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+          }
         </style>
       </head>
       <body>
@@ -798,7 +952,16 @@ app.get('/admin/delete-results', checkAuth, checkAdmin, async (req, res) => {
       <html>
         <head>
           <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Видалено результати</title>
+          <style>
+            body { font-size: 24px; margin: 20px; text-align: center; }
+            button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+            @media (max-width: 768px) {
+              body { font-size: 36px; }
+              button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+            }
+          </style>
         </head>
         <body>
           <h1>Результати успішно видалено</h1>
@@ -818,11 +981,19 @@ app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Редагувати назви тестів</title>
         <style>
           body { font-size: 24px; margin: 20px; }
           input { font-size: 24px; padding: 5px; margin: 5px; }
           button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+          label { font-size: 24px; }
+          @media (max-width: 768px) {
+            body { font-size: 36px; }
+            input { font-size: 36px; padding: 10px; margin: 10px; width: 100%; box-sizing: border-box; }
+            button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+            label { font-size: 36px; }
+          }
         </style>
       </head>
       <body>
@@ -865,7 +1036,16 @@ app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
       <html>
         <head>
           <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Назви оновлено</title>
+          <style>
+            body { font-size: 24px; margin: 20px; text-align: center; }
+            button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+            @media (max-width: 768px) {
+              body { font-size: 36px; }
+              button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+            }
+          </style>
         </head>
         <body>
           <h1>Назви та час тестів успішно оновлено</h1>
@@ -887,12 +1067,21 @@ app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
     <html>
       <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Створити новий тест</title>
         <style>
           body { font-size: 24px; margin: 20px; }
           input { font-size: 24px; padding: 5px; margin: 5px; }
           select { font-size: 24px; padding: 5px; margin: 5px; }
           button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+          label { font-size: 24px; }
+          @media (max-width: 768px) {
+            body { font-size: 36px; }
+            input { font-size: 36px; padding: 10px; margin: 10px; width: 100%; box-sizing: border-box; }
+            select { font-size: 36px; padding: 10px; margin: 10px; width: 100%; }
+            button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+            label { font-size: 36px; }
+          }
         </style>
       </head>
       <body>
@@ -938,7 +1127,16 @@ app.post('/admin/create-test', checkAuth, checkAdmin, async (req, res) => {
       <html>
         <head>
           <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Тест створено</title>
+          <style>
+            body { font-size: 24px; margin: 20px; text-align: center; }
+            button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+            @media (max-width: 768px) {
+              body { font-size: 36px; }
+              button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+            }
+          </style>
         </head>
         <body>
           <h1>Новий тест "${testName}" створено</h1>
