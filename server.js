@@ -4,6 +4,7 @@ const path = require('path');
 const ExcelJS = require('exceljs');
 const { createClient } = require('redis');
 const fs = require('fs');
+const multer = require('multer');
 
 const app = express();
 
@@ -35,7 +36,6 @@ const loadUsers = async () => {
       console.warn('Worksheet "Users" not found, trying "Sheet1"');
       sheet = workbook.getWorksheet('Sheet1');
       if (!sheet) {
-        console.error('Worksheet "Sheet1" not found in users.xlsx');
         throw new Error('Ни один из листов ("Users" или "Sheet1") не найден');
       }
     }
@@ -52,7 +52,6 @@ const loadUsers = async () => {
       }
     });
     if (Object.keys(users).length === 0) {
-      console.error('No valid users found in users.xlsx');
       throw new Error('Не знайдено користувачів у файлі');
     }
     console.log('Loaded users from Excel:', users);
@@ -113,6 +112,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
 
+const upload = multer({ dest: path.join(__dirname, 'uploads') });
+
 const redisClient = createClient({
   url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808',
   socket: {
@@ -157,6 +158,27 @@ const initializeServer = async () => {
   await initializeServer();
   app.use(ensureInitialized);
 })();
+
+const CAMERA_MODE_KEY = 'camera_mode';
+const getCameraMode = async () => {
+  const mode = await redisClient.get(CAMERA_MODE_KEY);
+  return mode === 'enabled';
+};
+
+const setCameraMode = async (enabled) => {
+  await redisClient.set(CAMERA_MODE_KEY, enabled ? 'enabled' : 'disabled');
+};
+
+(async () => {
+  const currentMode = await redisClient.get(CAMERA_MODE_KEY);
+  if (!currentMode) {
+    await setCameraMode(false);
+  }
+})();
+
+app.get('/favicon.*', (req, res) => {
+  res.status(404).send('Favicon not found');
+});
 
 app.get('/', (req, res) => {
   const savedPassword = req.cookies.savedPassword || '';
@@ -220,13 +242,13 @@ app.get('/', (req, res) => {
             width: 100%; 
           }
           .eye-icon { 
+            display: block;
             position: absolute; 
             right: 10px; 
             top: 50%; 
             transform: translateY(-50%); 
             cursor: pointer; 
             font-size: 24px; 
-            display: block; 
           }
           .checkbox-container { 
             font-size: 24px; 
@@ -338,7 +360,7 @@ app.post('/login', async (req, res) => {
     const { password, rememberMe } = req.body;
     if (!password) return res.status(400).json({ success: false, message: 'Пароль не вказано' });
     console.log('Checking password:', password, 'against validPasswords:', validPasswords);
-    const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
+    const user = Object.keys(validPasswords).find(u => validPasswords[u] === password.trim());
     if (!user) return res.status(401).json({ success: false, message: 'Невірний пароль' });
 
     res.cookie('auth', user, {
@@ -456,7 +478,27 @@ app.get('/select-test', checkAuth, (req, res) => {
   `);
 });
 
-const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousActivity) => {
+const getUserTest = async (user) => {
+  const userTestData = await redisClient.get(`user_test:${user}`);
+  if (!userTestData) return null;
+  return JSON.parse(userTestData);
+};
+
+const setUserTest = async (user, userTest) => {
+  await redisClient.set(`user_test:${user}`, JSON.stringify(userTest));
+};
+
+const deleteUserTest = async (user) => {
+  await redisClient.del(`user_test:${user}`);
+};
+
+const formatDuration = (duration) => {
+  const minutes = Math.floor(duration / 60);
+  const seconds = duration % 60;
+  return `${minutes} хв ${seconds} с`;
+};
+
+const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousBehavior) => {
   try {
     if (!redisClient.isOpen) {
       console.log('Redis not connected in saveResult, attempting to reconnect...');
@@ -471,7 +513,7 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       console.log('test_results cleared, new type:', await redisClient.type('test_results'));
     }
 
-    const userTest = JSON.parse(await redisClient.get(`userTest:${user}`));
+    const userTest = await getUserTest(user);
     const answers = userTest ? userTest.answers : {};
     const questions = userTest ? userTest.questions : [];
     const scoresPerQuestion = questions.map((q, index) => {
@@ -511,14 +553,14 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       duration,
       answers,
       scoresPerQuestion,
-      suspiciousActivity
+      suspiciousBehavior: suspiciousBehavior || 0
     };
     console.log('Saving result to Redis:', result);
     await redisClient.lPush('test_results', JSON.stringify(result));
     console.log(`Successfully saved result for ${user} in Redis`);
-    console.log('Type of test_results after save:', await redisClient.type('test_results'));
   } catch (error) {
     console.error('Ошибка сохранения в Redis:', error.stack);
+    throw error;
   }
 };
 
@@ -535,9 +577,9 @@ app.get('/test', checkAuth, async (req, res) => {
       currentQuestion: 0,
       startTime: Date.now(),
       timeLimit: testNames[testNumber].timeLimit * 1000,
-      suspiciousActivity: 0
+      suspiciousBehavior: 0
     };
-    await redisClient.set(`userTest:${req.user}`, JSON.stringify(userTest));
+    await setUserTest(req.user, userTest);
     res.redirect(`/test/question?index=0`);
   } catch (error) {
     console.error('Ошибка в /test:', error.stack);
@@ -547,15 +589,8 @@ app.get('/test', checkAuth, async (req, res) => {
 
 app.get('/test/question', checkAuth, async (req, res) => {
   if (req.user === 'admin') return res.redirect('/admin');
-  let userTest;
-  try {
-    const userTestData = await redisClient.get(`userTest:${req.user}`);
-    if (!userTestData) return res.status(400).send('Тест не розпочато');
-    userTest = JSON.parse(userTestData);
-  } catch (error) {
-    console.error('Ошибка при получении userTest из Redis:', error.stack);
-    return res.status(500).send('Помилка сервера');
-  }
+  const userTest = await getUserTest(req.user);
+  if (!userTest) return res.status(400).send('Тест не розпочато');
 
   const { questions, testNumber, answers, currentQuestion, startTime, timeLimit } = userTest;
   const index = parseInt(req.query.index) || 0;
@@ -565,7 +600,7 @@ app.get('/test/question', checkAuth, async (req, res) => {
   }
 
   userTest.currentQuestion = index;
-  await redisClient.set(`userTest:${req.user}`, JSON.stringify(userTest));
+  await setUserTest(req.user, userTest);
   const q = questions[index];
   console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
 
@@ -579,652 +614,451 @@ app.get('/test/question', checkAuth, async (req, res) => {
         isAnswered = String(answer).trim() !== '';
       }
     }
-    return {
-      number: i + 1,
-      answered: isAnswered
-    };
-  });
+    return `<span style="display: inline-block; width: 30px; height: 30px; line-height: 30px; text-align: center; border-radius: 50%; background-color: ${i === index ? '#ff0000' : (isAnswered ? '#00ff00' : '#ff0000')}; color: white; margin: 2px;">${i + 1}</span>`;
+  }).join('');
 
-  const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
-  const remainingTime = Math.max(0, Math.floor(timeLimit / 1000) - elapsedTime);
-  const minutes = Math.floor(remainingTime / 60).toString().padStart(2, '0');
-  const seconds = (remainingTime % 60).toString().padStart(2, '0');
+  const timeRemaining = Math.max(0, timeLimit - (Date.now() - startTime));
+  const minutes = Math.floor(timeRemaining / 1000 / 60);
+  const seconds = Math.floor((timeRemaining / 1000) % 60);
 
-  const cameraEnabled = await redisClient.get('cameraEnabled') === 'true';
+  const cameraEnabled = await getCameraMode();
 
-  let html = `
+  res.send(`
     <!DOCTYPE html>
     <html>
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>${testNames[testNumber].name}</title>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/face-api.min.js"></script>
         <style>
           body { 
             font-size: 32px; 
-            margin: 0; 
-            padding: 20px; 
-            padding-bottom: 100px; 
-            overflow-y: auto; 
+            margin: 20px; 
+            text-align: center; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            min-height: 100vh; 
+          }
+          h1 { 
+            margin-bottom: 10px; 
+          }
+          .timer { 
+            font-size: 32px; 
+            margin-bottom: 20px; 
+          }
+          .progress { 
+            margin-bottom: 20px; 
           }
           img { 
-            max-width: 300px; 
-          }
-          .question-container { 
+            max-width: 100%; 
+            height: auto; 
             margin-bottom: 20px; 
           }
-          .instruction { 
-            font-style: italic; 
-            font-size: 24px; 
-            color: #555; 
-            margin-top: 10px; 
-          }
-          .option-box { 
-            border: 2px solid #ccc; 
-            padding: 10px; 
-            margin: 10px 0; 
-            border-radius: 5px; 
-            width: 100%; 
-            box-sizing: border-box; 
-            text-align: center; 
-          }
-          .progress-bar { 
-            display: flex; 
-            flex-wrap: wrap; 
-            gap: 5px; 
+          .question { 
             margin-bottom: 20px; 
           }
-          .progress-circle { 
-            width: 30px; 
-            height: 30px; 
-            border-radius: 50%; 
+          .options { 
             display: flex; 
+            flex-direction: column; 
             align-items: center; 
-            justify-content: center; 
-            font-size: 20px; 
-          }
-          .progress-circle.unanswered { 
-            background-color: red; 
-            color: white; 
-          }
-          .progress-circle.answered { 
-            background-color: green; 
-            color: white; 
-          }
-          .option-box.selected { 
-            background-color: #90ee90; 
-          }
-          .button-container { 
-            position: fixed; 
-            bottom: 20px; 
-            left: 20px; 
-            right: 20px; 
-            display: flex; 
-            justify-content: space-between; 
             gap: 10px; 
+            margin-bottom: 20px; 
+          }
+          .option { 
+            font-size: 32px; 
+            padding: 10px; 
+            width: 100%; 
+            max-width: 500px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
+            background-color: #f0f0f0; 
+            cursor: pointer; 
+            text-align: left; 
+          }
+          .option.selected { 
+            background-color: #007bff; 
+            color: white; 
+          }
+          .option.ordering { 
+            cursor: move; 
+          }
+          input[type="text"] { 
+            font-size: 32px; 
+            padding: 10px; 
+            width: 100%; 
+            max-width: 500px; 
+            margin-bottom: 20px; 
+            box-sizing: border-box; 
+          }
+          .buttons { 
+            display: flex; 
+            justify-content: center; 
+            gap: 10px; 
+            width: 100%; 
+            max-width: 500px; 
           }
           button { 
             font-size: 32px; 
             padding: 10px 20px; 
             border: none; 
-            cursor: pointer; 
-            width: 30%; 
             border-radius: 5px; 
+            cursor: pointer; 
+            flex: 1; 
           }
-          .back-btn { 
-            background-color: red; 
+          #prevBtn { 
+            background-color: #6c757d; 
             color: white; 
           }
-          .next-btn { 
-            background-color: blue; 
-            color: white; 
-          }
-          .finish-btn { 
-            background-color: green; 
+          #nextBtn { 
+            background-color: #007bff; 
             color: white; 
           }
           button:disabled { 
-            background-color: grey; 
+            background-color: #cccccc; 
             cursor: not-allowed; 
-          }
-          #timer { 
-            font-size: 24px; 
-            margin-bottom: 20px; 
-          }
-          #confirm-modal { 
-            display: none; 
-            position: fixed; 
-            top: 50%; 
-            left: 50%; 
-            transform: translate(-50%, -50%); 
-            background: white; 
-            padding: 20px; 
-            border: 2px solid black; 
-            z-index: 1000; 
-          }
-          #confirm-modal button { 
-            margin: 0 10px; 
-          }
-          .sortable { 
-            cursor: move; 
-            touch-action: none; 
-          }
-          .sortable.dragging { 
-            opacity: 0.5; 
-          }
-          input[type="checkbox"] { 
-            width: 20px; 
-            height: 20px; 
-            margin-right: 10px; 
-          }
-          label { 
-            font-size: 32px; 
-          }
-          p { 
-            white-space: normal; 
-            word-wrap: break-word; 
-          }
-          #video { 
-            position: fixed; 
-            top: 10px; 
-            right: 10px; 
-            width: 100px; 
-            height: 100px; 
-            z-index: 1000; 
           }
           @media (max-width: 1024px) {
             body { 
               font-size: 48px; 
-              padding-bottom: 150px; 
+              margin: 30px; 
             }
-            img { 
-              max-width: 100%; 
+            h1 { 
+              font-size: 42px; 
+              margin-bottom: 15px; 
             }
-            .question-container { 
+            .timer { 
+              font-size: 32px; 
               margin-bottom: 30px; 
             }
-            .instruction { 
-              font-size: 36px; 
-              margin-top: 15px; 
+            .progress span { 
+              width: 40px; 
+              height: 40px; 
+              line-height: 40px; 
+              font-size: 24px; 
+              margin: 3px; 
             }
-            .option-box { 
+            .question { 
+              font-size: 32px; 
+              margin-bottom: 30px; 
+            }
+            .option { 
+              font-size: 24px; 
               padding: 15px; 
-              margin: 15px 0; 
-            }
-            .progress-circle { 
-              width: 50px; 
-              height: 50px; 
-              font-size: 30px; 
-            }
-            button { 
-              font-size: 48px; 
-              padding: 15px 30px; 
-              width: 30%; 
-            }
-            .button-container { 
-              gap: 15px; 
-            }
-            #timer { 
-              font-size: 36px; 
-            }
-            #confirm-modal { 
-              padding: 30px; 
-              width: 80%; 
-              max-width: 400px; 
-            }
-            #confirm-modal h2 { 
-              font-size: 48px; 
-            }
-            #confirm-modal button { 
-              font-size: 48px; 
-              padding: 15px 30px; 
+              max-width: 100%; 
             }
             input[type="text"] { 
-              font-size: 48px; 
+              font-size: 24px; 
               padding: 15px; 
-              width: 100%; 
-              box-sizing: border-box; 
+              max-width: 100%; 
             }
-            input[type="checkbox"] { 
-              width: 30px; 
-              height: 30px; 
-              margin-right: 15px; 
-            }
-            label { 
-              font-size: 48px; 
-            }
-            .sortable { 
-              padding: 20px; 
-              margin: 20px 0; 
-            }
-            #video { 
-              width: 80px; 
-              height: 80px; 
+            button { 
+              font-size: 32px; 
+              padding: 15px 30px; 
             }
           }
         </style>
       </head>
       <body>
         <h1>${testNames[testNumber].name}</h1>
-        <div id="timer">Залишилося часу: ${minutes} мм ${seconds} с</div>
-        <div class="progress-bar">
-          ${progress.map((p, i) => `
-            <div class="progress-circle ${p.answered ? 'answered' : 'unanswered'}">${p.number}</div>
-            ${(i + 1) % 10 === 0 && i < progress.length - 1 ? '<br>' : ''}
-          `).join('')}
-        </div>
-        <div class="question-container">
-  `;
-  if (q.picture) {
-    html += `<img src="${q.picture}" alt="Picture" onerror="this.src='/images/placeholder.png'; console.log('Image failed to load: ${q.picture}')"><br>`;
-  }
-  html += `
-          <p>${index + 1}. ${q.text}</p>
-  `;
-  if (q.type === 'multiple') {
-    html += `<p class="instruction">Виберіть всі правильні відповіді</p>`;
-  } else if (q.type === 'ordering') {
-    html += `<p class="instruction">Розмістіть відповіді у правильній послідовності</p>`;
-  }
-  if (!q.options || q.options.length === 0) {
-    const userAnswer = answers[index] || '';
-    html += `
-      <input type="text" id="answer" value="${userAnswer}" style="width: 100%; box-sizing: border-box;">
-    `;
-  } else if (q.type === 'multiple') {
-    html += q.options.map((option, i) => `
-      <div class="option-box" onclick="toggleOption(${i})" id="option-${i}">
-        <input type="checkbox" id="checkbox-${i}" ${answers[index] && answers[index].includes(String(option)) ? 'checked' : ''} style="display: none;">
-        <label for="checkbox-${i}">${option}</label>
-      </div>
-    `).join('');
-  } else if (q.type === 'ordering') {
-    const orderedOptions = answers[index] ? answers[index] : q.options;
-    html += `
-      <div id="sortable">
-        ${orderedOptions.map((option, i) => `
-          <div class="option-box sortable" data-index="${i}">${option}</div>
-        `).join('')}
-      </div>
-    `;
-  }
-  html += `
-        </div>
-        <div class="button-container">
-          <button class="back-btn" onclick="navigate(${index - 1})" ${index === 0 ? 'disabled' : ''}>Назад</button>
-          <button class="next-btn" onclick="navigate(${index + 1})" ${index === questions.length - 1 ? 'disabled' : ''}>Вперед</button>
-          <button class="finish-btn" onclick="showConfirmModal()">Завершити тест</button>
-        </div>
-        <div id="confirm-modal">
-          <h2>Ви впевнені, що хочете завершити тест?</h2>
-          <button onclick="finishTest()">Так</button>
-          <button onclick="hideConfirmModal()">Ні</button>
-        </div>
-        ${cameraEnabled ? `
-          <video id="video" autoplay playsinline></video>
-        ` : ''}
+        <div class="timer">Залишилося часу: ${minutes} хв ${seconds} с</div>
+        <div class="progress">${progress}</div>
+        ${q.picture ? `<img src="${q.picture}" alt="Question Image" onerror="this.src='/images/placeholder.png'">` : ''}
+        <div class="question">${q.text}</div>
+        <form id="questionForm" method="POST" action="/test/save-answer">
+          <input type="hidden" name="index" value="${index}">
+          <div class="options" id="options">
+            ${q.options && q.options.length > 0 ? q.options.map((option, i) => {
+              if (q.type === 'ordering') {
+                const userAnswer = answers[index] || q.options;
+                const idx = userAnswer.indexOf(option);
+                return `<div class="option ordering" draggable="true" data-index="${i}" style="order: ${idx}">${option}</div>`;
+              } else {
+                const isSelected = answers[index] && answers[index].includes(String(option));
+                return `
+                  <label class="option${isSelected ? ' selected' : ''}">
+                    <input type="${q.type === 'multiple' ? 'checkbox' : 'radio'}" name="answer" value="${option}" style="display: none;" ${isSelected ? 'checked' : ''}>
+                    ${option}
+                  </label>
+                `;
+              }
+            }).join('') : `<input type="text" name="answer" value="${answers[index] || ''}" placeholder="Введіть відповідь">`}
+          </div>
+          <div class="buttons">
+            <button type="button" id="prevBtn" onclick="window.location.href='/test/question?index=${index - 1}'" ${index === 0 ? 'disabled' : ''}>Назад</button>
+            <button type="submit" id="nextBtn">${index === questions.length - 1 ? 'Завершити тест' : 'Вперед'}</button>
+          </div>
+        </form>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@latest"></script>
         <script>
-          let answers = ${JSON.stringify(answers[index] || (q.type === 'multiple' ? [] : q.options))};
-          let suspiciousActivity = ${userTest.suspiciousActivity || 0};
-          let lastLookAwayTime = null;
+          const optionsContainer = document.getElementById('options');
+          let draggedItem = null;
 
-          function toggleOption(index) {
-            const option = document.getElementById('option-' + index);
-            const checkbox = document.getElementById('checkbox-' + index);
-            const value = ${JSON.stringify(q.options)}[index];
-            if (checkbox.checked) {
-              answers = answers.filter(v => v !== value);
-              checkbox.checked = false;
-              option.classList.remove('selected');
-            } else {
-              answers.push(value);
-              checkbox.checked = true;
-              option.classList.add('selected');
-            }
-            saveAnswer();
+          if (${q.type === 'ordering' ? 'true' : 'false'}) {
+            const options = document.querySelectorAll('.ordering');
+            options.forEach(option => {
+              option.addEventListener('dragstart', (e) => {
+                draggedItem = option;
+                setTimeout(() => option.style.display = 'none', 0);
+              });
+              option.addEventListener('dragend', (e) => {
+                setTimeout(() => {
+                  draggedItem.style.display = 'block';
+                  draggedItem = null;
+                }, 0);
+              });
+              option.addEventListener('dragover', (e) => e.preventDefault());
+              option.addEventListener('drop', (e) => {
+                e.preventDefault();
+                if (draggedItem) {
+                  const allOptions = [...document.querySelectorAll('.ordering')];
+                  const draggedIndex = allOptions.indexOf(draggedItem);
+                  const droppedIndex = allOptions.indexOf(option);
+                  if (draggedIndex < droppedIndex) {
+                    option.after(draggedItem);
+                  } else {
+                    option.before(draggedItem);
+                  }
+                  const newOrder = [...document.querySelectorAll('.ordering')].map(opt => opt.textContent);
+                  fetch('/test/save-answer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ index: ${index}, answer: newOrder })
+                  });
+                }
+              });
+            });
           }
 
-          async function navigate(index) {
-            await saveAnswer();
-            window.location.href = '/test/question?index=' + index;
-          }
+          document.querySelectorAll('.option:not(.ordering)').forEach(option => {
+            option.addEventListener('click', () => {
+              const input = option.querySelector('input');
+              if (input.type === 'radio') {
+                document.querySelectorAll('.option').forEach(opt => {
+                  opt.classList.remove('selected');
+                  opt.querySelector('input').checked = false;
+                });
+                input.checked = true;
+                option.classList.add('selected');
+              } else {
+                input.checked = !input.checked;
+                if (input.checked) option.classList.add('selected');
+                else option.classList.remove('selected');
+              }
+            });
+          });
 
-          async function saveAnswer() {
-            const answerInput = document.getElementById('answer');
-            if (answerInput) {
-              answers = answerInput.value;
-            }
-            await fetch('/test/save-answer', {
+          async function submitForm(event) {
+            event.preventDefault();
+            const form = document.getElementById('questionForm');
+            const answer = ${q.options && q.options.length > 0 ? q.type === 'ordering' ? 
+              '[...document.querySelectorAll(".ordering")].map(opt => opt.textContent)' : 
+              'Array.from(form.querySelectorAll("input[name=answer]:checked")).map(input => input.value)' : 
+              'form.querySelector("input[name=answer]").value'};
+            const response = await fetch('/test/save-answer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ index: ${index}, answer: answers, suspiciousActivity })
+              body: JSON.stringify({ index: ${index}, answer })
             });
+            const result = await response.json();
+            if (result.success) window.location.href = result.redirect;
           }
+          document.getElementById('questionForm').addEventListener('submit', submitForm);
 
-          function showConfirmModal() {
-            saveAnswer();
-            document.getElementById('confirm-modal').style.display = 'block';
-          }
-
-          function hideConfirmModal() {
-            document.getElementById('confirm-modal').style.display = 'none';
-          }
-
-          async function finishTest() {
-            await saveAnswer();
-            window.location.href = '/test/finish';
-          }
-
-          let timer = ${remainingTime};
-          setInterval(() => {
-            timer--;
-            if (timer <= 0) {
-              finishTest();
-            }
-            const minutes = Math.floor(timer / 60).toString().padStart(2, '0');
-            const seconds = (timer % 60).toString().padStart(2, '0');
-            document.getElementById('timer').textContent = 'Залишилося часу: ' + minutes + ' мм ' + seconds + ' с';
-          }, 1000);
-
-          const sortable = document.getElementById('sortable');
-          if (sortable) {
-            let dragged;
-            sortable.addEventListener('dragstart', (e) => {
-              dragged = e.target;
-              e.target.classList.add('dragging');
-            });
-            sortable.addEventListener('dragend', (e) => {
-              e.target.classList.remove('dragging');
-            });
-            sortable.addEventListener('dragover', (e) => {
-              e.preventDefault();
-            });
-            sortable.addEventListener('drop', (e) => {
-              e.preventDefault();
-              const target = e.target.closest('.sortable');
-              if (target && target !== dragged) {
-                const allItems = [...sortable.querySelectorAll('.sortable')];
-                const draggedIndex = allItems.indexOf(dragged);
-                const targetIndex = allItems.indexOf(target);
-                if (draggedIndex < targetIndex) {
-                  target.after(dragged);
-                } else {
-                  target.before(dragged);
-                }
-                answers = [...sortable.querySelectorAll('.sortable')].map(item => item.textContent);
-                saveAnswer();
-              }
-            });
-            let touchStartY = 0;
-            let touchElement = null;
-            sortable.addEventListener('touchstart', (e) => {
-              touchElement = e.target.closest('.sortable');
-              if (touchElement) {
-                touchStartY = e.touches[0].clientY;
-                touchElement.classList.add('dragging');
-              }
-            });
-            sortable.addEventListener('touchmove', (e) => {
-              e.preventDefault();
-              if (touchElement) {
-                const touchY = e.touches[0].clientY;
-                const allItems = [...sortable.querySelectorAll('.sortable')];
-                const touchElementRect = touchElement.getBoundingClientRect();
-                const touchElementCenter = touchElementRect.top + touchElementRect.height / 2;
-                const target = allItems.find(item => {
-                  const rect = item.getBoundingClientRect();
-                  const itemCenter = rect.top + rect.height / 2;
-                  return Math.abs(touchY - itemCenter) < rect.height / 2 && item !== touchElement;
-                });
-                if (target) {
-                  const draggedIndex = allItems.indexOf(touchElement);
-                  const targetIndex = allItems.indexOf(target);
-                  if (draggedIndex < targetIndex) {
-                    target.after(touchElement);
-                  } else {
-                    target.before(touchElement);
-                  }
-                }
-              }
-            });
-            sortable.addEventListener('touchend', (e) => {
-              if (touchElement) {
-                touchElement.classList.remove('dragging');
-                answers = [...sortable.querySelectorAll('.sortable')].map(item => item.textContent);
-                saveAnswer();
-                touchElement = null;
-              }
-            });
-          }
-
+          let suspiciousBehavior = ${userTest.suspiciousBehavior || 0};
           ${cameraEnabled ? `
             async function startCamera() {
-              try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                const video = document.getElementById('video');
-                video.srcObject = stream;
-
-                await Promise.all([
-                  faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/'),
-                  faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/')
-                ]);
-
-                video.addEventListener('play', () => {
-                  const canvas = faceapi.createCanvasFromMedia(video);
-                  document.body.append(canvas);
-                  const displaySize = { width: video.width, height: video.height };
-                  faceapi.matchDimensions(canvas, displaySize);
-
-                  setInterval(async () => {
-                    const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
-                    if (detections.length > 0) {
-                      const landmarks = detections[0].landmarks;
-                      const leftEye = landmarks.getLeftEye();
-                      const rightEye = landmarks.getRightEye();
-                      const nose = landmarks.getNose();
-
-                      const eyeCenterX = (leftEye[0].x + rightEye[3].x) / 2;
-                      const noseX = nose[3].x;
-                      const eyeCenterY = (leftEye[0].y + rightEye[3].y) / 2;
-                      const noseY = nose[3].y;
-
-                      const angleX = Math.abs(eyeCenterX - noseX);
-                      const angleY = Math.abs(eyeCenterY - noseY);
-
-                      if (angleX > 20 || angleY > 20) {
-                        if (!lastLookAwayTime) {
-                          lastLookAwayTime = Date.now();
-                        }
-                      } else {
-                        if (lastLookAwayTime) {
-                          const lookAwayDuration = (Date.now() - lastLookAwayTime) / 1000;
-                          suspiciousActivity += lookAwayDuration;
-                          lastLookAwayTime = null;
-                        }
-                      }
-                    } else {
-                      if (!lastLookAwayTime) {
-                        lastLookAwayTime = Date.now();
-                      }
-                    }
-                  }, 1000);
-                });
-              } catch (error) {
-                console.error('Error accessing camera:', error);
-              }
+              const video = document.createElement('video');
+              video.style.display = 'none';
+              document.body.appendChild(video);
+              const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+              video.srcObject = stream;
+              await video.play();
+              const model = await faceLandmarksDetection.load(
+                faceLandmarksDetection.SupportedPackages.mediapipeFacemesh
+              );
+              setInterval(async () => {
+                const faces = await model.estimateFaces({ input: video });
+                if (faces.length > 0) {
+                  const landmarks = faces[0].scaledMesh;
+                  const leftEye = landmarks[33];
+                  const rightEye = landmarks[263];
+                  const nose = landmarks[1];
+                  const eyeDirection = Math.atan2(rightEye[1] - leftEye[1], rightEye[0] - leftEye[0]);
+                  const noseDirection = Math.atan2(nose[1] - (leftEye[1] + rightEye[1]) / 2, nose[0] - (leftEye[0] + rightEye[0]) / 2);
+                  if (Math.abs(eyeDirection - noseDirection) > 0.5) {
+                    suspiciousBehavior += 1;
+                    fetch('/test/update-suspicious', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ suspiciousBehavior })
+                    });
+                  }
+                }
+              }, 1000);
             }
             startCamera();
           ` : ''}
-
-          window.addEventListener('blur', () => {
-            if (!lastLookAwayTime) {
-              lastLookAwayTime = Date.now();
-            }
-          });
-
-          window.addEventListener('focus', () => {
-            if (lastLookAwayTime) {
-              const lookAwayDuration = (Date.now() - lastLookAwayTime) / 1000;
-              suspiciousActivity += lookAwayDuration;
-              lastLookAwayTime = null;
-            }
-          });
         </script>
       </body>
     </html>
-  `;
-  res.send(html);
+  `);
 });
 
 app.post('/test/save-answer', checkAuth, async (req, res) => {
-  const { index, answer, suspiciousActivity } = req.body;
-  try {
-    const userTestData = await redisClient.get(`userTest:${req.user}`);
-    if (!userTestData) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
-    const userTest = JSON.parse(userTestData);
-    userTest.answers[index] = answer;
-    userTest.suspiciousActivity = suspiciousActivity;
-    await redisClient.set(`userTest:${req.user}`, JSON.stringify(userTest));
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Ошибка при сохранении ответа в Redis:', error.stack);
-    res.status(500).json({ success: false, message: 'Помилка сервера' });
+  const userTest = await getUserTest(req.user);
+  if (!userTest) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
+
+  const { index, answer } = req.body;
+  const idx = parseInt(index);
+  if (idx < 0 || idx >= userTest.questions.length) {
+    return res.status(400).json({ success: false, message: 'Невірний номер питання' });
   }
+
+  userTest.answers[idx] = answer;
+  userTest.currentQuestion = idx;
+  await setUserTest(req.user, userTest);
+
+  if (idx === userTest.questions.length - 1) {
+    res.json({ success: true, redirect: '/test/finish' });
+  } else {
+    res.json({ success: true, redirect: `/test/question?index=${idx + 1}` });
+  }
+});
+
+app.post('/test/update-suspicious', checkAuth, async (req, res) => {
+  const userTest = await getUserTest(req.user);
+  if (!userTest) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
+
+  userTest.suspiciousBehavior = req.body.suspiciousBehavior || 0;
+  await setUserTest(req.user, userTest);
+  res.json({ success: true });
 });
 
 app.get('/test/finish', checkAuth, async (req, res) => {
-  try {
-    const userTestData = await redisClient.get(`userTest:${req.user}`);
-    if (!userTestData) return res.status(400).send('Тест не розпочато');
-    const userTest = JSON.parse(userTestData);
+  const userTest = await getUserTest(req.user);
+  if (!userTest) return res.status(400).send('Тест не розпочато');
 
-    const { questions, testNumber, answers, startTime, suspiciousActivity } = userTest;
-    let score = 0;
-    let totalPoints = 0;
+  const { questions, testNumber, answers, startTime } = userTest;
+  let score = 0;
+  let totalPoints = 0;
 
-    questions.forEach((q, index) => {
-      totalPoints += q.points;
-      const userAnswer = answers[index];
-      let questionScore = 0;
-      if (!q.options || q.options.length === 0) {
-        if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
-          questionScore = q.points;
-        }
-      } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
-        const correctAnswers = q.correctAnswers.map(String);
-        const userAnswers = userAnswer.map(String);
-        if (correctAnswers.length === userAnswers.length && 
-            correctAnswers.every(val => userAnswers.includes(val)) && 
-            userAnswers.every(val => correctAnswers.includes(val))) {
-          questionScore = q.points;
-        }
-      } else if (q.type === 'ordering' && userAnswer && userAnswer.length > 0) {
-        const correctAnswers = q.correctAnswers.map(String);
-        const userAnswers = userAnswer.map(String);
-        if (correctAnswers.length === userAnswers.length && 
-            correctAnswers.every((val, idx) => val === userAnswers[idx])) {
-          questionScore = q.points;
-        }
+  questions.forEach((q, index) => {
+    totalPoints += q.points;
+    const userAnswer = answers[index];
+    if (!q.options || q.options.length === 0) {
+      if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
+        score += q.points;
       }
-      score += questionScore;
-    });
+    } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+      const correctAnswers = q.correctAnswers.map(String);
+      const userAnswers = userAnswer.map(String);
+      if (correctAnswers.length === userAnswers.length && 
+          correctAnswers.every(val => userAnswers.includes(val)) && 
+          userAnswers.every(val => correctAnswers.includes(val))) {
+        score += q.points;
+      }
+    } else if (q.type === 'ordering' && userAnswer && userAnswer.length > 0) {
+      const correctAnswers = q.correctAnswers.map(String);
+      const userAnswers = userAnswer.map(String);
+      if (correctAnswers.length === userAnswers.length && 
+          correctAnswers.every((val, idx) => val === userAnswers[idx])) {
+        score += q.points;
+      }
+    }
+  });
 
-    const endTime = Date.now();
-    const durationSeconds = Math.round((endTime - startTime) / 1000);
-    const minutes = Math.floor(durationSeconds / 60);
-    const seconds = durationSeconds % 60;
-    const suspiciousPercentage = Math.min(100, Math.round((suspiciousActivity / durationSeconds) * 100));
+  const endTime = Date.now();
+  const duration = Math.round((endTime - startTime) / 1000);
+  await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime, userTest.suspiciousBehavior);
+  await deleteUserTest(req.user);
 
-    await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime, suspiciousPercentage);
-    await redisClient.del(`userTest:${req.user}`);
-
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Результати</title>
-          <style>
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Результати тесту</title>
+        <style>
+          body { 
+            font-size: 32px; 
+            margin: 20px; 
+            text-align: center; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            min-height: 100vh; 
+          }
+          h1 { 
+            margin-bottom: 20px; 
+          }
+          p { 
+            margin: 10px 0; 
+          }
+          button { 
+            font-size: 32px; 
+            padding: 10px 20px; 
+            margin: 20px; 
+            width: 100%; 
+            max-width: 300px; 
+            border: none; 
+            border-radius: 5px; 
+            background-color: #007bff; 
+            color: white; 
+            cursor: pointer; 
+          }
+          button:hover { 
+            background-color: #0056b3; 
+          }
+          @media (max-width: 1024px) {
             body { 
-              font-size: 32px; 
-              margin: 20px; 
-              text-align: center; 
-              display: flex; 
-              flex-direction: column; 
-              align-items: center; 
-              min-height: 100vh; 
+              font-size: 48px; 
+              margin: 30px; 
             }
             h1 { 
-              margin-bottom: 20px; 
+              font-size: 64px; 
+              margin-bottom: 30px; 
             }
             p { 
-              white-space: normal; 
-              word-wrap: break-word; 
-              margin: 10px 0; 
+              font-size: 48px; 
+              margin: 15px 0; 
             }
             button { 
-              font-size: 32px; 
-              padding: 10px 20px; 
-              margin: 20px 0; 
-              width: 100%; 
-              max-width: 300px; 
-              border: none; 
-              border-radius: 5px; 
-              background-color: #007bff; 
-              color: white; 
-              cursor: pointer; 
+              font-size: 48px; 
+              padding: 15px 30px; 
+              margin: 30px; 
+              max-width: 100%; 
             }
-            button:hover { 
-              background-color: #0056b3; 
-            }
-            @media (max-width: 1024px) {
-              body { 
-                font-size: 48px; 
-                margin: 30px; 
-              }
-              h1 { 
-                font-size: 64px; 
-                margin-bottom: 30px; 
-              }
-              p { 
-                font-size: 48px; 
-                margin: 15px 0; 
-              }
-              button { 
-                font-size: 48px; 
-                padding: 15px 30px; 
-                max-width: 100%; 
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <h1>Результати</h1>
-          <p>Тест ${testNumber}: ${score} з ${totalPoints}</p>
-          <p>Тривалість: ${minutes} хв ${seconds} сек</p>
-          <p>Підозріла активність: ${suspiciousPercentage}%</p>
-          <button onclick="window.location.href='/select-test'">Повторить на голову</button>
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    console.error('Ошибка в /test/finish:', error.stack);
-    res.status(500).send('Помилка сервера');
-  }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>${testNames[testNumber].name}: ${formatDuration(duration)}</h1>
+        <p>Тривалість: ${formatDuration(duration)}</p>
+        <p>Підозріла активність: ${Math.round((userTest.suspiciousBehavior / (duration || 1)) * 100)}%</p>
+        <p>Результат: ${score} / ${totalPoints}</p>
+        <button onclick="window.location.href='/select-test'">Повернутися на головну</button>
+      </body>
+    </html>
+  `);
 });
 
-app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
+app.get('/admin', checkAdmin, async (req, res) => {
   try {
-    if (!redisClient.isOpen) {
-      console.log('Redis not connected in /admin, attempting to reconnect...');
-      await redisClient.connect();
-      console.log('Reconnected to Redis in /admin');
-    }
     const results = await redisClient.lRange('test_results', 0, -1);
     const parsedResults = results.map(r => JSON.parse(r));
-    const cameraEnabled = await redisClient.get('cameraEnabled') === 'true';
+    const questionsByTest = {};
+    for (const result of parsedResults) {
+      const testNumber = result.testNumber;
+      if (!questionsByTest[testNumber]) {
+        questionsByTest[testNumber] = await loadQuestions(testNumber).catch(err => {
+          console.error(`Ошибка загрузки вопросов для теста ${testNumber}:`, err.stack);
+          return [];
+        });
+      }
+    }
 
     res.send(`
       <!DOCTYPE html>
@@ -1232,78 +1066,81 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Адмін панель</title>
+          <title>Адмін-панель</title>
           <style>
             body { font-size: 16px; margin: 20px; }
+            h1 { font-size: 24px; margin-bottom: 20px; }
+            .admin-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+            .admin-buttons button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+            .admin-buttons button:hover { background-color: #0056b3; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid black; padding: 8px; text-align: left; }
-            th { background-color: #f2f2f2; }
-            button { font-size: 16px; padding: 5px 10px; margin: 5px; }
-            .toggle-container { margin: 20px 0; }
-            @media (max-width: 1024px) {
-              body { font-size: 24px; }
-              table { font-size: 24px; }
-              th, td { padding: 12px; }
-              button { font-size: 24px; padding: 10px 20px; }
-            }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+            th { background-color: #f0f0f0; }
+            button { font-size: 16px; padding: 5px 10px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+            button:hover { background-color: #0056b3; }
+            .answers { display: none; margin-top: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
           </style>
         </head>
         <body>
-          <h1>Адмін панель</h1>
-          <button onclick="window.location.href='/logout'">Вийти</button>
-          <div class="toggle-container">
-            <label>Режим камери: </label>
-            <button onclick="toggleCamera()">${cameraEnabled ? 'Вимкнути' : 'Увімкнути'}</button>
+          <h1>Адмін-панель</h1>
+          <div class="admin-buttons">
+            <button onclick="window.location.href='/admin/create-test'">Створити тест</button>
+            <button onclick="window.location.href='/admin/edit-tests'">Редагувати тести</button>
+            <button onclick="window.location.href='/admin/view-results'">Перегляд результатів тестів</button>
+            <button onclick="deleteResults()">Видалення результатів тестів</button>
+            <button onclick="toggleCamera()">Камера: ${await getCameraMode() ? 'Вимкнути' : 'Увімкнути'}</button>
           </div>
-          <h2>Результати тестів</h2>
           <table>
-            <tr>
-              <th>Користувач</th>
-              <th>Тест</th>
-              <th>Бали</th>
-              <th>Максимум</th>
-              <th>Тривалість (сек)</th>
-              <th>Підозріла активність (%)</th>
-              <th>Початок</th>
-              <th>Кінець</th>
-              <th>Відповіді</th>
-            </tr>
-            ${parsedResults.map(result => `
+            <thead>
               <tr>
-                <td>${result.user}</td>
-                <td>${result.testNumber}</td>
-                <td>${result.score}</td>
-                <td>${result.totalPoints}</td>
-                <td>${result.duration}</td>
-                <td>${result.suspiciousActivity || 0}</td>
-                <td>${result.startTime}</td>
-                <td>${result.endTime}</td>
-                <td>
-                  <button onclick="showAnswers('${encodeURIComponent(JSON.stringify(result.answers))}')">Показати відповіді</button>
-                </td>
+                <th>Користувач</th>
+                <th>Тест</th>
+                <th>Результат</th>
+                <th>Тривалість</th>
+                <th>Підозріла активність</th>
+                <th>Дата</th>
+                <th>Дії</th>
               </tr>
-            `).join('')}
+            </thead>
+            <tbody>
+              ${parsedResults.map((result, idx) => `
+                <tr>
+                  <td>${result.user}</td>
+                  <td>${testNames[result.testNumber]?.name || 'Невідомий тест'}</td>
+                  <td>${result.score} / ${result.totalPoints}</td>
+                  <td>${formatDuration(result.duration)}</td>
+                  <td>${Math.round((result.suspiciousBehavior / (result.duration || 1)) * 100)}%</td>
+                  <td>${new Date(result.endTime).toLocaleString()}</td>
+                  <td><button onclick="showAnswers(${idx})">Показати відповіді</button></td>
+                </tr>
+                <tr id="answers-${idx}" class="answers">
+                  <td colspan="7">
+                    ${Object.entries(result.answers).map(([qIdx, answer]) => {
+                      const question = result.scoresPerQuestion[qIdx] && questionsByTest[result.testNumber][qIdx] ? questionsByTest[result.testNumber][qIdx] : null;
+                      return question ? `
+                        <p>Питання ${parseInt(qIdx) + 1}: ${question.text}</p>
+                        <p>Відповідь: ${Array.isArray(answer) ? answer.join(', ') : answer}</p>
+                        <p>Бали: ${result.scoresPerQuestion[qIdx]} / ${question.points}</p>
+                      ` : '';
+                    }).join('')}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
           </table>
           <script>
-            function showAnswers(encodedAnswers) {
-              const answers = JSON.parse(decodeURIComponent(encodedAnswers));
-              let output = 'Відповіді:\\n';
-              for (const [question, answer] of Object.entries(answers)) {
-                output += \`Питання \${parseInt(question) + 1}: \${JSON.stringify(answer)}\\n\`;
-              }
-              alert(output);
+            function showAnswers(index) {
+              const answersDiv = document.getElementById('answers-' + index);
+              answersDiv.style.display = answersDiv.style.display === 'none' || !answersDiv.style.display ? 'block' : 'none';
             }
-
             async function toggleCamera() {
-              const response = await fetch('/admin/toggle-camera', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-              });
-              const result = await response.json();
-              if (result.success) {
-                window.location.reload();
-              } else {
-                alert('Помилка при зміні режиму камери');
+              const response = await fetch('/admin/toggle-camera', { method: 'POST' });
+              if ((await response.json()).success) window.location.reload();
+            }
+            async function deleteResults() {
+              if (confirm('Ви впевнені, що хочете видалити всі результати тестів?')) {
+                const response = await fetch('/admin/delete-results', { method: 'POST' });
+                if ((await response.json()).success) window.location.reload();
               }
             }
           </script>
@@ -1316,24 +1153,231 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
   }
 });
 
-app.post('/admin/toggle-camera', checkAuth, checkAdmin, async (req, res) => {
+app.post('/admin/toggle-camera', checkAdmin, async (req, res) => {
   try {
-    const currentState = await redisClient.get('cameraEnabled') === 'true';
-    await redisClient.set('cameraEnabled', String(!currentState));
+    const currentMode = await getCameraMode();
+    await setCameraMode(!currentMode);
     res.json({ success: true });
   } catch (error) {
-    console.error('Ошибка при переключении режима камеры:', error.stack);
+    console.error('Ошибка в /admin/toggle-camera:', error.stack);
     res.status(500).json({ success: false, message: 'Помилка сервера' });
   }
 });
 
-app.get('/logout', (req, res) => {
-  res.clearCookie('auth');
-  res.clearCookie('savedPassword');
-  res.redirect('/');
+app.get('/admin/create-test', checkAdmin, (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Створити тест</title>
+        <style>
+          body { font-size: 16px; margin: 20px; text-align: center; }
+          h1 { font-size: 24px; margin-bottom: 20px; }
+          form { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+          input, button { font-size: 16px; padding: 10px; width: 100%; max-width: 300px; box-sizing: border-box; }
+          button { border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+          button:hover { background-color: #0056b3; }
+        </style>
+      </head>
+      <body>
+        <h1>Створити тест</h1>
+        <form id="createTestForm" enctype="multipart/form-data" method="POST" action="/admin/create-test">
+          <input type="text" name="testName" placeholder="Назва тесту" required>
+          <input type="number" name="timeLimit" placeholder="Ліміт часу (сек)" required>
+          <input type="file" name="questionsFile" accept=".xlsx" required>
+          <button type="submit">Створити</button>
+        </form>
+      </body>
+    </html>
+  `);
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async (req, res) => {
+  try {
+    const { testName, timeLimit } = req.body;
+    const file = req.file;
+
+    if (!testName || !timeLimit || !file) {
+      return res.status(400).send('Усі поля обов’язкові');
+    }
+
+    const newTestNumber = String(Object.keys(testNames).length + 1);
+    testNames[newTestNumber] = { name: testName, timeLimit: parseInt(timeLimit) };
+
+    const newFilePath = path.join(__dirname, `questions${newTestNumber}.xlsx`);
+    fs.renameSync(file.path, newFilePath);
+
+    res.redirect('/admin');
+  } catch (error) {
+    console.error('Ошибка при создании теста:', error.stack);
+    res.status(500).send('Помилка сервера');
+  }
+});
+
+app.get('/admin/edit-tests', checkAdmin, (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Редагувати тести</title>
+        <style>
+          body { font-size: 16px; margin: 20px; text-align: center; }
+          h1 { font-size: 24px; margin-bottom: 20px; }
+          .test { margin-bottom: 20px; }
+          input, button { font-size: 16px; padding: 10px; width: 100%; max-width: 300px; box-sizing: border-box; margin: 5px 0; }
+          button { border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+          button:hover { background-color: #0056b3; }
+        </style>
+      </head>
+      <body>
+        <h1>Редагувати тести</h1>
+        ${Object.entries(testNames).map(([num, data]) => `
+          <div class="test">
+            <input type="text" id="testName-${num}" value="${data.name}">
+            <input type="number" id="timeLimit-${num}" value="${data.timeLimit}">
+            <button onclick="saveTest(${num})">Зберегти</button>
+          </div>
+        `).join('')}
+        <button onclick="window.location.href='/admin'">Повернутися</button>
+        <script>
+          async function saveTest(testNumber) {
+            const testName = document.getElementById('testName-' + testNumber).value;
+            const timeLimit = document.getElementById('timeLimit-' + testNumber).value;
+            const response = await fetch('/admin/edit-test', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ testNumber, testName, timeLimit })
+            });
+            if ((await response.json()).success) window.location.href = '/admin';
+          }
+        </script>
+      </body>
+    </html>
+  `);
+});
+
+app.post('/admin/edit-test', checkAdmin, async (req, res) => {
+  try {
+    const { testNumber, testName, timeLimit } = req.body;
+    if (!testNames[testNumber]) return res.status(404).json({ success: false, message: 'Тест не знайдено' });
+
+    testNames[testNumber] = { name: testName, timeLimit: parseInt(timeLimit) };
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка в /admin/edit-test:', error.stack);
+    res.status(500).json({ success: false, message: 'Помилка сервера' });
+  }
+});
+
+app.get('/admin/view-results', checkAdmin, async (req, res) => {
+  try {
+    const results = await redisClient.lRange('test_results', 0, -1);
+    const parsedResults = results.map(r => JSON.parse(r));
+    const questionsByTest = {};
+    for (const result of parsedResults) {
+      const testNumber = result.testNumber;
+      if (!questionsByTest[testNumber]) {
+        questionsByTest[testNumber] = await loadQuestions(testNumber).catch(err => {
+          console.error(`Ошибка загрузки вопросов для теста ${testNumber}:`, err.stack);
+          return [];
+        });
+      }
+    }
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Перегляд результатів тестів</title>
+          <style>
+            body { font-size: 16px; margin: 20px; }
+            h1 { font-size: 24px; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+            th { background-color: #f0f0f0; }
+            button { font-size: 16px; padding: 5px 10px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+            button:hover { background-color: #0056b3; }
+            .answers { display: none; margin-top: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+          </style>
+        </head>
+        <body>
+          <h1>Перегляд результатів тестів</h1>
+          <table>
+            <thead>
+              <tr>
+                <th>Користувач</th>
+                <th>Тест</th>
+                <th>Результат</th>
+                <th>Тривалість</th>
+                <th>Підозріла активність</th>
+                <th>Дата</th>
+                <th>Дії</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${parsedResults.map((result, idx) => `
+                <tr>
+                  <td>${result.user}</td>
+                  <td>${testNames[result.testNumber]?.name || 'Невідомий тест'}</td>
+                  <td>${result.score} / ${result.totalPoints}</td>
+                  <td>${formatDuration(result.duration)}</td>
+                  <td>${Math.round((result.suspiciousBehavior / (result.duration || 1)) * 100)}%</td>
+                  <td>${new Date(result.endTime).toLocaleString()}</td>
+                  <td><button onclick="showAnswers(${idx})">Показати відповіді</button></td>
+                </tr>
+                <tr id="answers-${idx}" class="answers">
+                  <td colspan="7">
+                    ${Object.entries(result.answers).map(([qIdx, answer]) => {
+                      const question = result.scoresPerQuestion[qIdx] && questionsByTest[result.testNumber][qIdx] ? questionsByTest[result.testNumber][qIdx] : null;
+                      return question ? `
+                        <p>Питання ${parseInt(qIdx) + 1}: ${question.text}</p>
+                        <p>Відповідь: ${Array.isArray(answer) ? answer.join(', ') : answer}</p>
+                        <p>Бали: ${result.scoresPerQuestion[qIdx]} / ${question.points}</p>
+                      ` : '';
+                    }).join('')}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <button onclick="window.location.href='/admin'">Повернутися</button>
+          <script>
+            function showAnswers(index) {
+              const answersDiv = document.getElementById('answers-' + index);
+              answersDiv.style.display = answersDiv.style.display === 'none' || !answersDiv.style.display ? 'block' : 'none';
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Ошибка в /admin/view-results:', error.stack);
+    res.status(500).send('Помилка сервера');
+  }
+});
+
+app.post('/admin/delete-results', checkAdmin, async (req, res) => {
+  try {
+    await redisClient.del('test_results');
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка в /admin/delete-results:', error.stack);
+    res.status(500).json({ success: false, message: 'Помилка сервера' });
+  }
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err.stack);
+  res.status(500).send('Помилка сервера');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
