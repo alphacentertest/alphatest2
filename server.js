@@ -226,6 +226,7 @@ app.get('/', (req, res) => {
             transform: translateY(-50%); 
             cursor: pointer; 
             font-size: 24px; 
+            display: block; 
           }
           .checkbox-container { 
             font-size: 24px; 
@@ -455,9 +456,7 @@ app.get('/select-test', checkAuth, (req, res) => {
   `);
 });
 
-const userTests = new Map();
-
-const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime) => {
+const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousActivity) => {
   try {
     if (!redisClient.isOpen) {
       console.log('Redis not connected in saveResult, attempting to reconnect...');
@@ -472,7 +471,7 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       console.log('test_results cleared, new type:', await redisClient.type('test_results'));
     }
 
-    const userTest = userTests.get(user);
+    const userTest = JSON.parse(await redisClient.get(`userTest:${user}`));
     const answers = userTest ? userTest.answers : {};
     const questions = userTest ? userTest.questions : [];
     const scoresPerQuestion = questions.map((q, index) => {
@@ -511,7 +510,8 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       endTime: new Date(endTime).toISOString(),
       duration,
       answers,
-      scoresPerQuestion
+      scoresPerQuestion,
+      suspiciousActivity
     };
     console.log('Saving result to Redis:', result);
     await redisClient.lPush('test_results', JSON.stringify(result));
@@ -528,14 +528,16 @@ app.get('/test', checkAuth, async (req, res) => {
   if (!testNames[testNumber]) return res.status(404).send('Тест не знайдено');
   try {
     const questions = await loadQuestions(testNumber);
-    userTests.set(req.user, {
+    const userTest = {
       testNumber,
       questions,
       answers: {},
       currentQuestion: 0,
       startTime: Date.now(),
-      timeLimit: testNames[testNumber].timeLimit * 1000
-    });
+      timeLimit: testNames[testNumber].timeLimit * 1000,
+      suspiciousActivity: 0
+    };
+    await redisClient.set(`userTest:${req.user}`, JSON.stringify(userTest));
     res.redirect(`/test/question?index=0`);
   } catch (error) {
     console.error('Ошибка в /test:', error.stack);
@@ -543,10 +545,17 @@ app.get('/test', checkAuth, async (req, res) => {
   }
 });
 
-app.get('/test/question', checkAuth, (req, res) => {
+app.get('/test/question', checkAuth, async (req, res) => {
   if (req.user === 'admin') return res.redirect('/admin');
-  const userTest = userTests.get(req.user);
-  if (!userTest) return res.status(400).send('Тест не розпочато');
+  let userTest;
+  try {
+    const userTestData = await redisClient.get(`userTest:${req.user}`);
+    if (!userTestData) return res.status(400).send('Тест не розпочато');
+    userTest = JSON.parse(userTestData);
+  } catch (error) {
+    console.error('Ошибка при получении userTest из Redis:', error.stack);
+    return res.status(500).send('Помилка сервера');
+  }
 
   const { questions, testNumber, answers, currentQuestion, startTime, timeLimit } = userTest;
   const index = parseInt(req.query.index) || 0;
@@ -556,6 +565,7 @@ app.get('/test/question', checkAuth, (req, res) => {
   }
 
   userTest.currentQuestion = index;
+  await redisClient.set(`userTest:${req.user}`, JSON.stringify(userTest));
   const q = questions[index];
   console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
 
@@ -580,6 +590,8 @@ app.get('/test/question', checkAuth, (req, res) => {
   const minutes = Math.floor(remainingTime / 60).toString().padStart(2, '0');
   const seconds = (remainingTime % 60).toString().padStart(2, '0');
 
+  const cameraEnabled = await redisClient.get('cameraEnabled') === 'true';
+
   let html = `
     <!DOCTYPE html>
     <html>
@@ -587,6 +599,7 @@ app.get('/test/question', checkAuth, (req, res) => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>${testNames[testNumber].name}</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/face-api.min.js"></script>
         <style>
           body { 
             font-size: 32px; 
@@ -649,6 +662,7 @@ app.get('/test/question', checkAuth, (req, res) => {
             right: 20px; 
             display: flex; 
             justify-content: space-between; 
+            gap: 10px; 
           }
           button { 
             font-size: 32px; 
@@ -711,6 +725,14 @@ app.get('/test/question', checkAuth, (req, res) => {
             white-space: normal; 
             word-wrap: break-word; 
           }
+          #video { 
+            position: fixed; 
+            top: 10px; 
+            right: 10px; 
+            width: 100px; 
+            height: 100px; 
+            z-index: 1000; 
+          }
           @media (max-width: 1024px) {
             body { 
               font-size: 48px; 
@@ -738,12 +760,9 @@ app.get('/test/question', checkAuth, (req, res) => {
             button { 
               font-size: 48px; 
               padding: 15px 30px; 
-              width: 100%; 
-              margin: 5px 0; 
+              width: 30%; 
             }
             .button-container { 
-              flex-direction: column; 
-              align-items: center; 
               gap: 15px; 
             }
             #timer { 
@@ -778,6 +797,10 @@ app.get('/test/question', checkAuth, (req, res) => {
             .sortable { 
               padding: 20px; 
               margin: 20px 0; 
+            }
+            #video { 
+              width: 80px; 
+              height: 80px; 
             }
           }
         </style>
@@ -838,8 +861,14 @@ app.get('/test/question', checkAuth, (req, res) => {
           <button onclick="finishTest()">Так</button>
           <button onclick="hideConfirmModal()">Ні</button>
         </div>
+        ${cameraEnabled ? `
+          <video id="video" autoplay playsinline></video>
+        ` : ''}
         <script>
           let answers = ${JSON.stringify(answers[index] || (q.type === 'multiple' ? [] : q.options))};
+          let suspiciousActivity = ${userTest.suspiciousActivity || 0};
+          let lastLookAwayTime = null;
+
           function toggleOption(index) {
             const option = document.getElementById('option-' + index);
             const checkbox = document.getElementById('checkbox-' + index);
@@ -855,31 +884,38 @@ app.get('/test/question', checkAuth, (req, res) => {
             }
             saveAnswer();
           }
-          function navigate(index) {
-            saveAnswer();
+
+          async function navigate(index) {
+            await saveAnswer();
             window.location.href = '/test/question?index=' + index;
           }
-          function saveAnswer() {
+
+          async function saveAnswer() {
             const answerInput = document.getElementById('answer');
             if (answerInput) {
               answers = answerInput.value;
             }
-            fetch('/test/save-answer', {
+            await fetch('/test/save-answer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ index: ${index}, answer: answers })
+              body: JSON.stringify({ index: ${index}, answer: answers, suspiciousActivity })
             });
           }
+
           function showConfirmModal() {
             saveAnswer();
             document.getElementById('confirm-modal').style.display = 'block';
           }
+
           function hideConfirmModal() {
             document.getElementById('confirm-modal').style.display = 'none';
           }
-          function finishTest() {
+
+          async function finishTest() {
+            await saveAnswer();
             window.location.href = '/test/finish';
           }
+
           let timer = ${remainingTime};
           setInterval(() => {
             timer--;
@@ -890,6 +926,7 @@ app.get('/test/question', checkAuth, (req, res) => {
             const seconds = (timer % 60).toString().padStart(2, '0');
             document.getElementById('timer').textContent = 'Залишилося часу: ' + minutes + ' мм ' + seconds + ' с';
           }, 1000);
+
           const sortable = document.getElementById('sortable');
           if (sortable) {
             let dragged;
@@ -960,6 +997,79 @@ app.get('/test/question', checkAuth, (req, res) => {
               }
             });
           }
+
+          ${cameraEnabled ? `
+            async function startCamera() {
+              try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+
+                await Promise.all([
+                  faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/'),
+                  faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/')
+                ]);
+
+                video.addEventListener('play', () => {
+                  const canvas = faceapi.createCanvasFromMedia(video);
+                  document.body.append(canvas);
+                  const displaySize = { width: video.width, height: video.height };
+                  faceapi.matchDimensions(canvas, displaySize);
+
+                  setInterval(async () => {
+                    const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
+                    if (detections.length > 0) {
+                      const landmarks = detections[0].landmarks;
+                      const leftEye = landmarks.getLeftEye();
+                      const rightEye = landmarks.getRightEye();
+                      const nose = landmarks.getNose();
+
+                      const eyeCenterX = (leftEye[0].x + rightEye[3].x) / 2;
+                      const noseX = nose[3].x;
+                      const eyeCenterY = (leftEye[0].y + rightEye[3].y) / 2;
+                      const noseY = nose[3].y;
+
+                      const angleX = Math.abs(eyeCenterX - noseX);
+                      const angleY = Math.abs(eyeCenterY - noseY);
+
+                      if (angleX > 20 || angleY > 20) {
+                        if (!lastLookAwayTime) {
+                          lastLookAwayTime = Date.now();
+                        }
+                      } else {
+                        if (lastLookAwayTime) {
+                          const lookAwayDuration = (Date.now() - lastLookAwayTime) / 1000;
+                          suspiciousActivity += lookAwayDuration;
+                          lastLookAwayTime = null;
+                        }
+                      }
+                    } else {
+                      if (!lastLookAwayTime) {
+                        lastLookAwayTime = Date.now();
+                      }
+                    }
+                  }, 1000);
+                });
+              } catch (error) {
+                console.error('Error accessing camera:', error);
+              }
+            }
+            startCamera();
+          ` : ''}
+
+          window.addEventListener('blur', () => {
+            if (!lastLookAwayTime) {
+              lastLookAwayTime = Date.now();
+            }
+          });
+
+          window.addEventListener('focus', () => {
+            if (lastLookAwayTime) {
+              const lookAwayDuration = (Date.now() - lastLookAwayTime) / 1000;
+              suspiciousActivity += lookAwayDuration;
+              lastLookAwayTime = null;
+            }
+          });
         </script>
       </body>
     </html>
@@ -967,121 +1077,142 @@ app.get('/test/question', checkAuth, (req, res) => {
   res.send(html);
 });
 
-app.post('/test/save-answer', checkAuth, (req, res) => {
-  const { index, answer } = req.body;
-  const userTest = userTests.get(req.user);
-  if (!userTest) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
-  userTest.answers[index] = answer;
-  res.json({ success: true });
+app.post('/test/save-answer', checkAuth, async (req, res) => {
+  const { index, answer, suspiciousActivity } = req.body;
+  try {
+    const userTestData = await redisClient.get(`userTest:${req.user}`);
+    if (!userTestData) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
+    const userTest = JSON.parse(userTestData);
+    userTest.answers[index] = answer;
+    userTest.suspiciousActivity = suspiciousActivity;
+    await redisClient.set(`userTest:${req.user}`, JSON.stringify(userTest));
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка при сохранении ответа в Redis:', error.stack);
+    res.status(500).json({ success: false, message: 'Помилка сервера' });
+  }
 });
 
 app.get('/test/finish', checkAuth, async (req, res) => {
-  const userTest = userTests.get(req.user);
-  if (!userTest) return res.status(400).send('Тест не розпочато');
+  try {
+    const userTestData = await redisClient.get(`userTest:${req.user}`);
+    if (!userTestData) return res.status(400).send('Тест не розпочато');
+    const userTest = JSON.parse(userTestData);
 
-  const { questions, testNumber, answers, startTime } = userTest;
-  let score = 0;
-  let totalPoints = 0;
+    const { questions, testNumber, answers, startTime, suspiciousActivity } = userTest;
+    let score = 0;
+    let totalPoints = 0;
 
-  questions.forEach((q, index) => {
-    totalPoints += q.points;
-    const userAnswer = answers[index];
-    let questionScore = 0;
-    if (!q.options || q.options.length === 0) {
-      if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
-        questionScore = q.points;
+    questions.forEach((q, index) => {
+      totalPoints += q.points;
+      const userAnswer = answers[index];
+      let questionScore = 0;
+      if (!q.options || q.options.length === 0) {
+        if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
+          questionScore = q.points;
+        }
+      } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+        const correctAnswers = q.correctAnswers.map(String);
+        const userAnswers = userAnswer.map(String);
+        if (correctAnswers.length === userAnswers.length && 
+            correctAnswers.every(val => userAnswers.includes(val)) && 
+            userAnswers.every(val => correctAnswers.includes(val))) {
+          questionScore = q.points;
+        }
+      } else if (q.type === 'ordering' && userAnswer && userAnswer.length > 0) {
+        const correctAnswers = q.correctAnswers.map(String);
+        const userAnswers = userAnswer.map(String);
+        if (correctAnswers.length === userAnswers.length && 
+            correctAnswers.every((val, idx) => val === userAnswers[idx])) {
+          questionScore = q.points;
+        }
       }
-    } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
-      const correctAnswers = q.correctAnswers.map(String);
-      const userAnswers = userAnswer.map(String);
-      if (correctAnswers.length === userAnswers.length && 
-          correctAnswers.every(val => userAnswers.includes(val)) && 
-          userAnswers.every(val => correctAnswers.includes(val))) {
-        questionScore = q.points;
-      }
-    } else if (q.type === 'ordering' && userAnswer && userAnswer.length > 0) {
-      const correctAnswers = q.correctAnswers.map(String);
-      const userAnswers = userAnswer.map(String);
-      if (correctAnswers.length === userAnswers.length && 
-          correctAnswers.every((val, idx) => val === userAnswers[idx])) {
-        questionScore = q.points;
-      }
-    }
-    score += questionScore;
-  });
+      score += questionScore;
+    });
 
-  const endTime = Date.now();
-  await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime);
-  userTests.delete(req.user);
+    const endTime = Date.now();
+    const durationSeconds = Math.round((endTime - startTime) / 1000);
+    const minutes = Math.floor(durationSeconds / 60);
+    const seconds = durationSeconds % 60;
+    const suspiciousPercentage = Math.min(100, Math.round((suspiciousActivity / durationSeconds) * 100));
 
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Результати</title>
-        <style>
-          body { 
-            font-size: 32px; 
-            margin: 20px; 
-            text-align: center; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            min-height: 100vh; 
-          }
-          h1 { 
-            margin-bottom: 20px; 
-          }
-          p { 
-            white-space: normal; 
-            word-wrap: break-word; 
-            margin: 10px 0; 
-          }
-          button { 
-            font-size: 32px; 
-            padding: 10px 20px; 
-            margin: 20px 0; 
-            width: 100%; 
-            max-width: 300px; 
-            border: none; 
-            border-radius: 5px; 
-            background-color: #007bff; 
-            color: white; 
-            cursor: pointer; 
-          }
-          button:hover { 
-            background-color: #0056b3; 
-          }
-          @media (max-width: 1024px) {
+    await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime, suspiciousPercentage);
+    await redisClient.del(`userTest:${req.user}`);
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Результати</title>
+          <style>
             body { 
-              font-size: 48px; 
-              margin: 30px; 
+              font-size: 32px; 
+              margin: 20px; 
+              text-align: center; 
+              display: flex; 
+              flex-direction: column; 
+              align-items: center; 
+              min-height: 100vh; 
             }
             h1 { 
-              font-size: 64px; 
-              margin-bottom: 30px; 
+              margin-bottom: 20px; 
             }
             p { 
-              font-size: 48px; 
-              margin: 15px 0; 
+              white-space: normal; 
+              word-wrap: break-word; 
+              margin: 10px 0; 
             }
             button { 
-              font-size: 48px; 
-              padding: 15px 30px; 
-              max-width: 100%; 
+              font-size: 32px; 
+              padding: 10px 20px; 
+              margin: 20px 0; 
+              width: 100%; 
+              max-width: 300px; 
+              border: none; 
+              border-radius: 5px; 
+              background-color: #007bff; 
+              color: white; 
+              cursor: pointer; 
             }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Результати</h1>
-        <p>Тест ${testNumber}: ${score} з ${totalPoints}, тривалість: ${Math.round((endTime - startTime) / 1000)} сек</p>
-        <button onclick="window.location.href='/select-test'">Повторить на голову</button>
-      </body>
-    </html>
-  `);
+            button:hover { 
+              background-color: #0056b3; 
+            }
+            @media (max-width: 1024px) {
+              body { 
+                font-size: 48px; 
+                margin: 30px; 
+              }
+              h1 { 
+                font-size: 64px; 
+                margin-bottom: 30px; 
+              }
+              p { 
+                font-size: 48px; 
+                margin: 15px 0; 
+              }
+              button { 
+                font-size: 48px; 
+                padding: 15px 30px; 
+                max-width: 100%; 
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Результати</h1>
+          <p>Тест ${testNumber}: ${score} з ${totalPoints}</p>
+          <p>Тривалість: ${minutes} хв ${seconds} сек</p>
+          <p>Підозріла активність: ${suspiciousPercentage}%</p>
+          <button onclick="window.location.href='/select-test'">Повторить на голову</button>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Ошибка в /test/finish:', error.stack);
+    res.status(500).send('Помилка сервера');
+  }
 });
 
 app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
@@ -1093,6 +1224,7 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
     }
     const results = await redisClient.lRange('test_results', 0, -1);
     const parsedResults = results.map(r => JSON.parse(r));
+    const cameraEnabled = await redisClient.get('cameraEnabled') === 'true';
 
     res.send(`
       <!DOCTYPE html>
@@ -1107,6 +1239,7 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
             th, td { border: 1px solid black; padding: 8px; text-align: left; }
             th { background-color: #f2f2f2; }
             button { font-size: 16px; padding: 5px 10px; margin: 5px; }
+            .toggle-container { margin: 20px 0; }
             @media (max-width: 1024px) {
               body { font-size: 24px; }
               table { font-size: 24px; }
@@ -1118,6 +1251,10 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
         <body>
           <h1>Адмін панель</h1>
           <button onclick="window.location.href='/logout'">Вийти</button>
+          <div class="toggle-container">
+            <label>Режим камери: </label>
+            <button onclick="toggleCamera()">${cameraEnabled ? 'Вимкнути' : 'Увімкнути'}</button>
+          </div>
           <h2>Результати тестів</h2>
           <table>
             <tr>
@@ -1126,6 +1263,7 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
               <th>Бали</th>
               <th>Максимум</th>
               <th>Тривалість (сек)</th>
+              <th>Підозріла активність (%)</th>
               <th>Початок</th>
               <th>Кінець</th>
               <th>Відповіді</th>
@@ -1137,6 +1275,7 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
                 <td>${result.score}</td>
                 <td>${result.totalPoints}</td>
                 <td>${result.duration}</td>
+                <td>${result.suspiciousActivity || 0}</td>
                 <td>${result.startTime}</td>
                 <td>${result.endTime}</td>
                 <td>
@@ -1154,6 +1293,19 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
               }
               alert(output);
             }
+
+            async function toggleCamera() {
+              const response = await fetch('/admin/toggle-camera', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+              });
+              const result = await response.json();
+              if (result.success) {
+                window.location.reload();
+              } else {
+                alert('Помилка при зміні режиму камери');
+              }
+            }
           </script>
         </body>
       </html>
@@ -1161,6 +1313,17 @@ app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
   } catch (error) {
     console.error('Ошибка в /admin:', error.stack);
     res.status(500).send('Помилка сервера');
+  }
+});
+
+app.post('/admin/toggle-camera', checkAuth, checkAdmin, async (req, res) => {
+  try {
+    const currentState = await redisClient.get('cameraEnabled') === 'true';
+    await redisClient.set('cameraEnabled', String(!currentState));
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка при переключении режима камеры:', error.stack);
+    res.status(500).json({ success: false, message: 'Помилка сервера' });
   }
 });
 
