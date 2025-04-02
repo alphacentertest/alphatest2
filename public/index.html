@@ -1,33 +1,32 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <title>Вхід</title>
-</head>
-<body>
-  <h1>Вхід у систему</h1>
-  <label for="password">Введіть код користувача:</label>
-  <input type="password" id="password" placeholder="Код">
-  <button onclick="login()">Увійти</button>
-
-  <script>
-    async function login() {
-      const password = document.getElementById('password').value;
-      try {
+  <head>
+    <meta charset="UTF-8">
+    <title>Вхід</title>
+  </head>
+  <body>
+    <h1>Вхід</h1>
+    <form id="loginForm">
+      <input type="password" id="password" name="password" placeholder="Введіть пароль"><br><br>
+      <button type="submit">Увійти</button>
+    </form>
+    <p id="message"></p>
+    <script>
+      document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const password = document.getElementById('password').value;
         const response = await fetch('/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password })
         });
-        const data = await response.json();
-        if (data.success) {
-          window.location.href = '/select-test'; // Перенаправление
+        const result = await response.json();
+        if (result.success) {
+          window.location.href = result.redirect;
         } else {
-          alert(data.message || 'Невірний пароль');
+          document.getElementById('message').textContent = result.message;
         }
-      } catch (error) {
-        alert('Помилка сервера: ' + error.message);
-      }
-    }
-  </script>
-</body>
+      });
+    </script>
+  </body>
 </html>

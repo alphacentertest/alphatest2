@@ -5,6 +5,7 @@ const ExcelJS = require('exceljs');
 const { createClient } = require('redis');
 const fs = require('fs');
 const multer = require('multer');
+const { put, get } = require('@vercel/blob');
 
 const app = express();
 
@@ -16,6 +17,20 @@ let testNames = {
   '2': { name: 'Тест 2', timeLimit: 3600 }
 };
 
+// Настройка multer для использования /tmp
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, '/tmp');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage: storage });
+
+/** Завантаження користувачів із файлу users.xlsx */
 const loadUsers = async () => {
   try {
     const filePath = path.join(__dirname, 'users.xlsx');
@@ -62,14 +77,20 @@ const loadUsers = async () => {
   }
 };
 
+/** Завантаження питань для тесту */
 const loadQuestions = async (testNumber) => {
   try {
-    const filePath = path.join(__dirname, `questions${testNumber}.xlsx`);
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File questions${testNumber}.xlsx not found at path: ${filePath}`);
+    const questionsFileUrl = testNames[testNumber].questionsFileUrl;
+    if (!questionsFileUrl) {
+      throw new Error(`Questions file URL for test ${testNumber} not found`);
     }
+
+    // Загружаем файл из Vercel Blob
+    const response = await get(questionsFileUrl);
+    const buffer = Buffer.from(await response.arrayBuffer());
+
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.load(buffer);
     const jsonData = [];
     const sheet = workbook.getWorksheet('Questions');
 
@@ -97,6 +118,7 @@ const loadQuestions = async (testNumber) => {
   }
 };
 
+/** Перевірка ініціалізації сервера */
 const ensureInitialized = (req, res, next) => {
   if (!isInitialized) {
     if (initializationError) {
@@ -112,8 +134,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
 
-const upload = multer({ dest: path.join(__dirname, 'uploads') });
-
+/** Налаштування Redis-клієнта */
 const redisClient = createClient({
   url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808',
   socket: {
@@ -126,6 +147,7 @@ redisClient.on('error', (err) => console.error('Redis Client Error:', err));
 redisClient.on('connect', () => console.log('Redis connected'));
 redisClient.on('reconnecting', () => console.log('Redis reconnecting'));
 
+/** Ініціалізація сервера */
 const initializeServer = async () => {
   let attempt = 1;
   const maxAttempts = 5;
@@ -180,6 +202,7 @@ app.get('/favicon.*', (req, res) => {
   res.status(404).send('Favicon not found');
 });
 
+/** Головна сторінка з формою входу */
 app.get('/', (req, res) => {
   const savedPassword = req.cookies.savedPassword || '';
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -355,6 +378,7 @@ app.get('/', (req, res) => {
   `);
 });
 
+/** Обробка входу користувача */
 app.post('/login', async (req, res) => {
   try {
     const { password, rememberMe } = req.body;
@@ -392,6 +416,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
+/** Перевірка автентифікації */
 const checkAuth = (req, res, next) => {
   const user = req.cookies.auth;
   console.log('checkAuth: user from cookies:', user);
@@ -399,10 +424,12 @@ const checkAuth = (req, res, next) => {
     console.log('checkAuth: No valid auth cookie, redirecting to /');
     return res.redirect('/');
   }
+  console.log('checkAuth: User authenticated, proceeding...');
   req.user = user;
   next();
 };
 
+/** Перевірка прав адміністратора */
 const checkAdmin = (req, res, next) => {
   const user = req.cookies.auth;
   console.log('checkAdmin: user from cookies:', user);
@@ -410,9 +437,11 @@ const checkAdmin = (req, res, next) => {
     console.log('checkAdmin: Not admin, returning 403');
     return res.status(403).send('Доступно тільки для адміністратора (403 Forbidden)');
   }
+  console.log('checkAdmin: Admin access granted, proceeding...');
   next();
 };
 
+/** Сторінка вибору тесту */
 app.get('/select-test', checkAuth, (req, res) => {
   if (req.user === 'admin') return res.redirect('/admin');
   res.send(`
@@ -478,26 +507,31 @@ app.get('/select-test', checkAuth, (req, res) => {
   `);
 });
 
+/** Отримання даних тесту користувача */
 const getUserTest = async (user) => {
   const userTestData = await redisClient.get(`user_test:${user}`);
   if (!userTestData) return null;
   return JSON.parse(userTestData);
 };
 
+/** Збереження даних тесту користувача */
 const setUserTest = async (user, userTest) => {
   await redisClient.set(`user_test:${user}`, JSON.stringify(userTest));
 };
 
+/** Видалення даних тесту користувача */
 const deleteUserTest = async (user) => {
   await redisClient.del(`user_test:${user}`);
 };
 
+/** Форматування тривалості */
 const formatDuration = (duration) => {
   const minutes = Math.floor(duration / 60);
   const seconds = duration % 60;
   return `${minutes} хв ${seconds} с`;
 };
 
+/** Збереження результатів тесту */
 const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousBehavior) => {
   try {
     if (!redisClient.isOpen) {
@@ -564,6 +598,7 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
   }
 };
 
+/** Початок тесту */
 app.get('/test', checkAuth, async (req, res) => {
   if (req.user === 'admin') return res.redirect('/admin');
   const testNumber = req.query.test;
@@ -587,6 +622,7 @@ app.get('/test', checkAuth, async (req, res) => {
   }
 });
 
+/** Відображення питання тесту */
 app.get('/test/question', checkAuth, async (req, res) => {
   if (req.user === 'admin') return res.redirect('/admin');
   const userTest = await getUserTest(req.user);
@@ -906,6 +942,7 @@ app.get('/test/question', checkAuth, async (req, res) => {
   `);
 });
 
+/** Збереження відповіді на питання */
 app.post('/test/save-answer', checkAuth, async (req, res) => {
   const userTest = await getUserTest(req.user);
   if (!userTest) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
@@ -927,6 +964,7 @@ app.post('/test/save-answer', checkAuth, async (req, res) => {
   }
 });
 
+/** Оновлення підозрілої поведінки */
 app.post('/test/update-suspicious', checkAuth, async (req, res) => {
   const userTest = await getUserTest(req.user);
   if (!userTest) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
@@ -936,6 +974,7 @@ app.post('/test/update-suspicious', checkAuth, async (req, res) => {
   res.json({ success: true });
 });
 
+/** Завершення тесту */
 app.get('/test/finish', checkAuth, async (req, res) => {
   const userTest = await getUserTest(req.user);
   if (!userTest) return res.status(400).send('Тест не розпочато');
@@ -1045,6 +1084,7 @@ app.get('/test/finish', checkAuth, async (req, res) => {
   `);
 });
 
+/** Адмін-панель */
 app.get('/admin', checkAdmin, async (req, res) => {
   try {
     const results = await redisClient.lRange('test_results', 0, -1);
@@ -1153,6 +1193,7 @@ app.get('/admin', checkAdmin, async (req, res) => {
   }
 });
 
+/** Перемикання режиму камери */
 app.post('/admin/toggle-camera', checkAdmin, async (req, res) => {
   try {
     const currentMode = await getCameraMode();
@@ -1164,6 +1205,7 @@ app.post('/admin/toggle-camera', checkAdmin, async (req, res) => {
   }
 });
 
+/** Сторінка створення тесту */
 app.get('/admin/create-test', checkAdmin, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -1194,6 +1236,7 @@ app.get('/admin/create-test', checkAdmin, (req, res) => {
   `);
 });
 
+/** Обробка створення тесту */
 app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async (req, res) => {
   try {
     const { testName, timeLimit } = req.body;
@@ -1206,8 +1249,20 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
     const newTestNumber = String(Object.keys(testNames).length + 1);
     testNames[newTestNumber] = { name: testName, timeLimit: parseInt(timeLimit) };
 
-    const newFilePath = path.join(__dirname, `questions${newTestNumber}.xlsx`);
-    fs.renameSync(file.path, newFilePath);
+    // Загружаем файл в Vercel Blob с обработкой ошибок
+    let blob;
+    try {
+      blob = await put(`questions${newTestNumber}.xlsx`, fs.readFileSync(file.path), { access: 'public' });
+    } catch (blobError) {
+      console.error('Ошибка при загрузке в Vercel Blob:', blobError);
+      throw new Error('Не удалось загрузить файл в хранилище');
+    }
+
+    // Сохраняем URL файла
+    testNames[newTestNumber].questionsFileUrl = blob.url;
+
+    // Удаляем временный файл из /tmp
+    fs.unlinkSync(file.path);
 
     res.redirect('/admin');
   } catch (error) {
@@ -1216,6 +1271,7 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
   }
 });
 
+/** Сторінка редагування тестів */
 app.get('/admin/edit-tests', checkAdmin, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -1260,6 +1316,7 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
   `);
 });
 
+/** Обробка редагування тесту */
 app.post('/admin/edit-test', checkAdmin, async (req, res) => {
   try {
     const { testNumber, testName, timeLimit } = req.body;
@@ -1273,6 +1330,7 @@ app.post('/admin/edit-test', checkAdmin, async (req, res) => {
   }
 });
 
+/** Перегляд результатів тестів */
 app.get('/admin/view-results', checkAdmin, async (req, res) => {
   try {
     const results = await redisClient.lRange('test_results', 0, -1);
@@ -1362,6 +1420,7 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
   }
 });
 
+/** Видалення результатів тестів */
 app.post('/admin/delete-results', checkAdmin, async (req, res) => {
   try {
     await redisClient.del('test_results');
@@ -1372,11 +1431,13 @@ app.post('/admin/delete-results', checkAdmin, async (req, res) => {
   }
 });
 
+/** Глобальний обробник помилок */
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.stack);
   res.status(500).send('Помилка сервера');
 });
 
+/** Запуск сервера */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
