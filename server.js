@@ -160,6 +160,9 @@ const initializeServer = async () => {
 
 app.get('/', (req, res) => {
   const savedPassword = req.cookies.savedPassword || '';
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -168,20 +171,112 @@ app.get('/', (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Вхід</title>
         <style>
-          body { font-size: 32px; margin: 20px; display: flex; justify-content: center; align-items: center; height: 100vh; }
-          .login-container { text-align: center; }
-          input[type="password"], input[type="text"] { font-size: 32px; padding: 10px; margin: 10px 0; width: 300px; }
-          button { font-size: 32px; padding: 10px 20px; margin: 10px 0; }
-          .error { color: red; }
-          .password-container { position: relative; display: inline-block; }
-          .eye-icon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: 24px; }
-          .checkbox-container { font-size: 24px; margin: 10px 0; }
+          body { 
+            font-size: 32px; 
+            margin: 0; 
+            padding: 20px; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+            box-sizing: border-box; 
+          }
+          .login-container { 
+            text-align: center; 
+            width: 100%; 
+            max-width: 500px; 
+          }
+          h1 { 
+            margin-bottom: 20px; 
+          }
+          input[type="password"], input[type="text"] { 
+            font-size: 32px; 
+            padding: 10px; 
+            margin: 10px 0; 
+            width: 100%; 
+            box-sizing: border-box; 
+          }
+          button { 
+            font-size: 32px; 
+            padding: 10px 20px; 
+            margin: 10px 0; 
+            width: 100%; 
+            box-sizing: border-box; 
+            border: none; 
+            background-color: #007bff; 
+            color: white; 
+            border-radius: 5px; 
+            cursor: pointer; 
+          }
+          button:hover { 
+            background-color: #0056b3; 
+          }
+          .error { 
+            color: red; 
+            margin-top: 10px; 
+          }
+          .password-container { 
+            position: relative; 
+            width: 100%; 
+          }
+          .eye-icon { 
+            position: absolute; 
+            right: 10px; 
+            top: 50%; 
+            transform: translateY(-50%); 
+            cursor: pointer; 
+            font-size: 24px; 
+          }
+          .checkbox-container { 
+            font-size: 24px; 
+            margin: 10px 0; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            gap: 10px; 
+          }
+          input[type="checkbox"] { 
+            width: 20px; 
+            height: 20px; 
+          }
           @media (max-width: 1024px) {
-            body { font-size: 48px; }
-            input[type="password"], input[type="text"] { font-size: 48px; padding: 15px; width: 400px; }
-            button { font-size: 48px; padding: 15px 30px; }
-            .eye-icon { font-size: 36px; right: 15px; }
-            .checkbox-container { font-size: 36px; }
+            body { 
+              font-size: 48px; 
+              padding: 30px; 
+            }
+            .login-container { 
+              max-width: 100%; 
+            }
+            h1 { 
+              font-size: 64px; 
+              margin-bottom: 30px; 
+            }
+            input[type="password"], input[type="text"] { 
+              font-size: 48px; 
+              padding: 15px; 
+              margin: 15px 0; 
+            }
+            button { 
+              font-size: 48px; 
+              padding: 15px 30px; 
+              margin: 15px 0; 
+            }
+            .eye-icon { 
+              font-size: 36px; 
+              right: 15px; 
+            }
+            .checkbox-container { 
+              font-size: 36px; 
+              gap: 15px; 
+            }
+            input[type="checkbox"] { 
+              width: 30px; 
+              height: 30px; 
+            }
+            .error { 
+              font-size: 36px; 
+              margin-top: 15px; 
+            }
           }
         </style>
       </head>
@@ -305,11 +400,48 @@ app.get('/select-test', checkAuth, (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Вибір тесту</title>
         <style>
-          body { font-size: 32px; margin: 20px; text-align: center; }
-          button { font-size: 32px; padding: 10px 20px; margin: 10px; }
+          body { 
+            font-size: 32px; 
+            margin: 20px; 
+            text-align: center; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            min-height: 100vh; 
+          }
+          h1 { 
+            margin-bottom: 20px; 
+          }
+          button { 
+            font-size: 32px; 
+            padding: 10px 20px; 
+            margin: 10px; 
+            width: 100%; 
+            max-width: 300px; 
+            border: none; 
+            border-radius: 5px; 
+            background-color: #f0f0f0; 
+            cursor: pointer; 
+            transition: background-color 0.3s ease; 
+          }
+          button:hover { 
+            background-color: #d0d0d0; 
+          }
           @media (max-width: 1024px) {
-            body { font-size: 48px; }
-            button { font-size: 48px; padding: 15px 30px; margin: 15px; }
+            body { 
+              font-size: 48px; 
+              margin: 30px; 
+            }
+            h1 { 
+              font-size: 64px; 
+              margin-bottom: 30px; 
+            }
+            button { 
+              font-size: 48px; 
+              padding: 15px 30px; 
+              margin: 15px; 
+              max-width: 100%; 
+            }
           }
         </style>
       </head>
@@ -456,42 +588,197 @@ app.get('/test/question', checkAuth, (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>${testNames[testNumber].name}</title>
         <style>
-          body { font-size: 32px; margin: 0; padding: 20px; padding-bottom: 80px; }
-          img { max-width: 300px; }
-          .option-box { border: 2px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px; }
-          .progress-bar { display: flex; align-items: center; margin-bottom: 20px; }
-          .progress-line { flex-grow: 1; height: 2px; background-color: #ccc; }
-          .progress-circle { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 5px; font-size: 20px; }
-          .progress-circle.unanswered { background-color: red; color: white; }
-          .progress-circle.answered { background-color: green; color: white; }
-          .progress-line.answered { background-color: green; }
-          .option-box.selected { background-color: #90ee90; }
-          .button-container { position: fixed; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; }
-          button { font-size: 32px; padding: 10px 20px; border: none; cursor: pointer; }
-          .back-btn { background-color: red; color: white; }
-          .next-btn { background-color: blue; color: white; }
-          .finish-btn { background-color: green; color: white; }
-          button:disabled { background-color: grey; cursor: not-allowed; }
-          #timer { font-size: 24px; margin-bottom: 20px; }
-          #confirm-modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 2px solid black; z-index: 1000; }
-          #confirm-modal button { margin: 0 10px; }
-          .sortable { cursor: move; touch-action: none; }
-          .sortable.dragging { opacity: 0.5; }
-          .instruction { font-style: italic; font-size: 24px; margin-top: 5px; color: #555; }
+          body { 
+            font-size: 32px; 
+            margin: 0; 
+            padding: 20px; 
+            padding-bottom: 100px; 
+            overflow-y: auto; 
+          }
+          img { 
+            max-width: 300px; 
+          }
+          .question-container { 
+            margin-bottom: 20px; 
+          }
+          .instruction { 
+            font-style: italic; 
+            font-size: 24px; 
+            color: #555; 
+            margin-top: 10px; 
+          }
+          .option-box { 
+            border: 2px solid #ccc; 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            width: 100%; 
+            box-sizing: border-box; 
+            text-align: center; 
+          }
+          .progress-bar { 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 5px; 
+            margin-bottom: 20px; 
+          }
+          .progress-circle { 
+            width: 30px; 
+            height: 30px; 
+            border-radius: 50%; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-size: 20px; 
+          }
+          .progress-circle.unanswered { 
+            background-color: red; 
+            color: white; 
+          }
+          .progress-circle.answered { 
+            background-color: green; 
+            color: white; 
+          }
+          .option-box.selected { 
+            background-color: #90ee90; 
+          }
+          .button-container { 
+            position: fixed; 
+            bottom: 20px; 
+            left: 20px; 
+            right: 20px; 
+            display: flex; 
+            justify-content: space-between; 
+          }
+          button { 
+            font-size: 32px; 
+            padding: 10px 20px; 
+            border: none; 
+            cursor: pointer; 
+            width: 30%; 
+            border-radius: 5px; 
+          }
+          .back-btn { 
+            background-color: red; 
+            color: white; 
+          }
+          .next-btn { 
+            background-color: blue; 
+            color: white; 
+          }
+          .finish-btn { 
+            background-color: green; 
+            color: white; 
+          }
+          button:disabled { 
+            background-color: grey; 
+            cursor: not-allowed; 
+          }
+          #timer { 
+            font-size: 24px; 
+            margin-bottom: 20px; 
+          }
+          #confirm-modal { 
+            display: none; 
+            position: fixed; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            background: white; 
+            padding: 20px; 
+            border: 2px solid black; 
+            z-index: 1000; 
+          }
+          #confirm-modal button { 
+            margin: 0 10px; 
+          }
+          .sortable { 
+            cursor: move; 
+            touch-action: none; 
+          }
+          .sortable.dragging { 
+            opacity: 0.5; 
+          }
+          input[type="checkbox"] { 
+            width: 20px; 
+            height: 20px; 
+            margin-right: 10px; 
+          }
+          label { 
+            font-size: 32px; 
+          }
+          p { 
+            white-space: normal; 
+            word-wrap: break-word; 
+          }
           @media (max-width: 1024px) {
-            body { font-size: 48px; }
-            img { max-width: 400px; }
-            .option-box { padding: 15px; margin: 10px 0; }
-            .progress-circle { width: 50px; height: 50px; font-size: 30px; margin: 0 10px; }
-            .progress-line { height: 4px; }
-            button { font-size: 48px; padding: 15px 30px; }
-            #timer { font-size: 36px; }
-            #confirm-modal { padding: 30px; }
-            #confirm-modal h2 { font-size: 48px; }
-            #confirm-modal button { font-size: 48px; padding: 15px 30px; }
-            input[type="text"] { font-size: 48px; padding: 15px; width: 100%; box-sizing: border-box; }
-            label { font-size: 48px; }
-            .instruction { font-size: 36px; }
+            body { 
+              font-size: 48px; 
+              padding-bottom: 150px; 
+            }
+            img { 
+              max-width: 100%; 
+            }
+            .question-container { 
+              margin-bottom: 30px; 
+            }
+            .instruction { 
+              font-size: 36px; 
+              margin-top: 15px; 
+            }
+            .option-box { 
+              padding: 15px; 
+              margin: 15px 0; 
+            }
+            .progress-circle { 
+              width: 50px; 
+              height: 50px; 
+              font-size: 30px; 
+            }
+            button { 
+              font-size: 48px; 
+              padding: 15px 30px; 
+              width: 100%; 
+              margin: 5px 0; 
+            }
+            .button-container { 
+              flex-direction: column; 
+              align-items: center; 
+              gap: 15px; 
+            }
+            #timer { 
+              font-size: 36px; 
+            }
+            #confirm-modal { 
+              padding: 30px; 
+              width: 80%; 
+              max-width: 400px; 
+            }
+            #confirm-modal h2 { 
+              font-size: 48px; 
+            }
+            #confirm-modal button { 
+              font-size: 48px; 
+              padding: 15px 30px; 
+            }
+            input[type="text"] { 
+              font-size: 48px; 
+              padding: 15px; 
+              width: 100%; 
+              box-sizing: border-box; 
+            }
+            input[type="checkbox"] { 
+              width: 30px; 
+              height: 30px; 
+              margin-right: 15px; 
+            }
+            label { 
+              font-size: 48px; 
+            }
+            .sortable { 
+              padding: 20px; 
+              margin: 20px 0; 
+            }
           }
         </style>
       </head>
@@ -501,10 +788,10 @@ app.get('/test/question', checkAuth, (req, res) => {
         <div class="progress-bar">
           ${progress.map((p, i) => `
             <div class="progress-circle ${p.answered ? 'answered' : 'unanswered'}">${p.number}</div>
-            ${i < progress.length - 1 ? '<div class="progress-line ' + (p.answered ? 'answered' : '') + '"></div>' : ''}
+            ${(i + 1) % 10 === 0 && i < progress.length - 1 ? '<br>' : ''}
           `).join('')}
         </div>
-        <div>
+        <div class="question-container">
   `;
   if (q.picture) {
     html += `<img src="${q.picture}" alt="Picture" onerror="this.src='/images/placeholder.png'; console.log('Image failed to load: ${q.picture}')"><br>`;
@@ -512,181 +799,166 @@ app.get('/test/question', checkAuth, (req, res) => {
   html += `
           <p>${index + 1}. ${q.text}</p>
   `;
+  if (q.type === 'multiple') {
+    html += `<p class="instruction">Виберіть всі правильні відповіді</p>`;
+  } else if (q.type === 'ordering') {
+    html += `<p class="instruction">Розмістіть відповіді у правильній послідовності</p>`;
+  }
   if (!q.options || q.options.length === 0) {
     const userAnswer = answers[index] || '';
     html += `
-      <input type="text" name="q${index}" id="q${index}_input" value="${userAnswer}" placeholder="Введіть відповідь"><br>
+      <input type="text" id="answer" value="${userAnswer}" style="width: 100%; box-sizing: border-box;">
     `;
+  } else if (q.type === 'multiple') {
+    html += q.options.map((option, i) => `
+      <div class="option-box" onclick="toggleOption(${i})" id="option-${i}">
+        <input type="checkbox" id="checkbox-${i}" ${answers[index] && answers[index].includes(String(option)) ? 'checked' : ''} style="display: none;">
+        <label for="checkbox-${i}">${option}</label>
+      </div>
+    `).join('');
   } else if (q.type === 'ordering') {
+    const orderedOptions = answers[index] ? answers[index] : q.options;
     html += `
-      <p class="instruction">Розмістіть відповіді у правильній послідовності</p>
-      <div id="sortable-${index}" class="sortable-list">
-        ${(answers[index] || q.options).map((option, optIndex) => `
-          <div class="option-box sortable" draggable="true" data-index="${optIndex}" data-value="${option}">
-            ${option}
-          </div>
+      <div id="sortable">
+        ${orderedOptions.map((option, i) => `
+          <div class="option-box sortable" data-index="${i}">${option}</div>
         `).join('')}
       </div>
-    `;
-  } else {
-    html += `
-      <p class="instruction">Виберіть всі правильні відповіді</p>
-      ${q.options.map((option, optIndex) => {
-        const checked = answers[index]?.includes(option) ? 'checked' : '';
-        return `
-          <div class="option-box ${checked ? 'selected' : ''}">
-            <input type="checkbox" name="q${index}" value="${option}" id="q${index}_${optIndex}" ${checked}>
-            <label for="q${index}_${optIndex}">${option}</label>
-          </div>
-        `;
-      }).join('')}
     `;
   }
   html += `
         </div>
         <div class="button-container">
-          <button class="back-btn" ${index === 0 ? 'disabled' : ''} onclick="window.location.href='/test/question?index=${index - 1}'">Назад</button>
-          <button class="next-btn" ${index === questions.length - 1 ? 'disabled' : ''} onclick="saveAndNext(${index})">Вперед</button>
-          <button class="finish-btn" onclick="showConfirm(${index})">Завершити тест</button>
+          <button class="back-btn" onclick="navigate(${index - 1})" ${index === 0 ? 'disabled' : ''}>Назад</button>
+          <button class="next-btn" onclick="navigate(${index + 1})" ${index === questions.length - 1 ? 'disabled' : ''}>Вперед</button>
+          <button class="finish-btn" onclick="showConfirmModal()">Завершити тест</button>
         </div>
         <div id="confirm-modal">
-          <h2>Ви дійсно бажаєте завершити тест?</h2>
-          <button onclick="finishTest(${index})">Так</button>
-          <button onclick="hideConfirm()">Ні</button>
+          <h2>Ви впевнені, що хочете завершити тест?</h2>
+          <button onclick="finishTest()">Так</button>
+          <button onclick="hideConfirmModal()">Ні</button>
         </div>
         <script>
-          let startTime = ${startTime};
-          let timeLimit = ${timeLimit};
-          const timerElement = document.getElementById('timer');
-          function updateTimer() {
-            const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
-            const remainingTime = Math.max(0, Math.floor(timeLimit / 1000) - elapsedTime);
-            const minutes = Math.floor(remainingTime / 60).toString().padStart(2, '0');
-            const seconds = (remainingTime % 60).toString().padStart(2, '0');
-            timerElement.textContent = 'Залишилося часу: ' + minutes + ' мм ' + seconds + ' с';
-            if (remainingTime <= 0) {
-              window.location.href = '/result';
-            }
-          }
-          updateTimer();
-          setInterval(updateTimer, 1000);
-
-          const sortableList = document.getElementById('sortable-${index}');
-          if (sortableList) {
-            let draggedItem = null;
-            let touchStartY = 0;
-            let touchStartTime = 0;
-
-            const items = sortableList.querySelectorAll('.sortable');
-
-            // Десктоп: Drag-and-Drop
-            items.forEach(item => {
-              item.addEventListener('dragstart', (e) => {
-                draggedItem = item;
-                item.classList.add('dragging');
-              });
-              item.addEventListener('dragend', () => {
-                draggedItem.classList.remove('dragging');
-                draggedItem = null;
-              });
-            });
-
-            sortableList.addEventListener('dragover', (e) => {
-              e.preventDefault();
-              const afterElement = getDragAfterElement(sortableList, e.clientY);
-              if (afterElement == null) {
-                sortableList.appendChild(draggedItem);
-              } else {
-                sortableList.insertBefore(draggedItem, afterElement);
-              }
-            });
-
-            // Мобильные устройства: Touch Events
-            items.forEach(item => {
-              item.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                draggedItem = item;
-                touchStartY = e.touches[0].clientY;
-                touchStartTime = Date.now();
-                item.classList.add('dragging');
-              });
-
-              item.addEventListener('touchmove', (e) => {
-                e.preventDefault();
-                const touchY = e.touches[0].clientY;
-                const afterElement = getDragAfterElement(sortableList, touchY);
-                if (afterElement == null) {
-                  sortableList.appendChild(draggedItem);
-                } else {
-                  sortableList.insertBefore(draggedItem, afterElement);
-                }
-              });
-
-              item.addEventListener('touchend', () => {
-                draggedItem.classList.remove('dragging');
-                draggedItem = null;
-              });
-            });
-
-            function getDragAfterElement(container, y) {
-              const sortableElements = [...container.querySelectorAll('.sortable:not(.dragging)')];
-              return sortableElements.reduce((closest, child) => {
-                const box = child.getBoundingClientRect();
-                const offset = y - box.top - box.height / 2;
-                if (offset < 0 && offset > closest.offset) {
-                  return { offset: offset, element: child };
-                } else {
-                  return closest;
-                }
-              }, { offset: Number.NEGATIVE_INFINITY }).element;
-            }
-          }
-
-          async function saveAndNext(index) {
-            let answers;
-            if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
-              answers = document.getElementById('q' + index + '_input').value;
-            } else if (document.getElementById('sortable-' + index)) {
-              const items = document.querySelectorAll('#sortable-' + index + ' .sortable');
-              answers = Array.from(items).map(item => item.dataset.value);
+          let answers = ${JSON.stringify(answers[index] || (q.type === 'multiple' ? [] : q.options))};
+          function toggleOption(index) {
+            const option = document.getElementById('option-' + index);
+            const checkbox = document.getElementById('checkbox-' + index);
+            const value = ${JSON.stringify(q.options)}[index];
+            if (checkbox.checked) {
+              answers = answers.filter(v => v !== value);
+              checkbox.checked = false;
+              option.classList.remove('selected');
             } else {
-              const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
-              answers = Array.from(checked).map(input => input.value);
+              answers.push(value);
+              checkbox.checked = true;
+              option.classList.add('selected');
             }
-            await fetch('/answer', {
+            saveAnswer();
+          }
+          function navigate(index) {
+            saveAnswer();
+            window.location.href = '/test/question?index=' + index;
+          }
+          function saveAnswer() {
+            const answerInput = document.getElementById('answer');
+            if (answerInput) {
+              answers = answerInput.value;
+            }
+            fetch('/test/save-answer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ index, answer: answers })
+              body: JSON.stringify({ index: ${index}, answer: answers })
             });
-            window.location.href = '/test/question?index=' + (index + 1);
           }
-
-          function showConfirm(index) {
+          function showConfirmModal() {
+            saveAnswer();
             document.getElementById('confirm-modal').style.display = 'block';
           }
-
-          function hideConfirm() {
+          function hideConfirmModal() {
             document.getElementById('confirm-modal').style.display = 'none';
           }
-
-          async function finishTest(index) {
-            let answers;
-            if (document.querySelector('input[type="text"][name="q' + index + '"]')) {
-              answers = document.getElementById('q' + index + '_input').value;
-            } else if (document.getElementById('sortable-' + index)) {
-              const items = document.querySelectorAll('#sortable-' + index + ' .sortable');
-              answers = Array.from(items).map(item => item.dataset.value);
-            } else {
-              const checked = document.querySelectorAll('input[name="q' + index + '"]:checked');
-              answers = Array.from(checked).map(input => input.value);
+          function finishTest() {
+            window.location.href = '/test/finish';
+          }
+          let timer = ${remainingTime};
+          setInterval(() => {
+            timer--;
+            if (timer <= 0) {
+              finishTest();
             }
-            await fetch('/answer', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ index, answer: answers })
+            const minutes = Math.floor(timer / 60).toString().padStart(2, '0');
+            const seconds = (timer % 60).toString().padStart(2, '0');
+            document.getElementById('timer').textContent = 'Залишилося часу: ' + minutes + ' мм ' + seconds + ' с';
+          }, 1000);
+          const sortable = document.getElementById('sortable');
+          if (sortable) {
+            let dragged;
+            sortable.addEventListener('dragstart', (e) => {
+              dragged = e.target;
+              e.target.classList.add('dragging');
             });
-            hideConfirm();
-            window.location.href = '/result';
+            sortable.addEventListener('dragend', (e) => {
+              e.target.classList.remove('dragging');
+            });
+            sortable.addEventListener('dragover', (e) => {
+              e.preventDefault();
+            });
+            sortable.addEventListener('drop', (e) => {
+              e.preventDefault();
+              const target = e.target.closest('.sortable');
+              if (target && target !== dragged) {
+                const allItems = [...sortable.querySelectorAll('.sortable')];
+                const draggedIndex = allItems.indexOf(dragged);
+                const targetIndex = allItems.indexOf(target);
+                if (draggedIndex < targetIndex) {
+                  target.after(dragged);
+                } else {
+                  target.before(dragged);
+                }
+                answers = [...sortable.querySelectorAll('.sortable')].map(item => item.textContent);
+                saveAnswer();
+              }
+            });
+            let touchStartY = 0;
+            let touchElement = null;
+            sortable.addEventListener('touchstart', (e) => {
+              touchElement = e.target.closest('.sortable');
+              if (touchElement) {
+                touchStartY = e.touches[0].clientY;
+                touchElement.classList.add('dragging');
+              }
+            });
+            sortable.addEventListener('touchmove', (e) => {
+              e.preventDefault();
+              if (touchElement) {
+                const touchY = e.touches[0].clientY;
+                const allItems = [...sortable.querySelectorAll('.sortable')];
+                const touchElementRect = touchElement.getBoundingClientRect();
+                const touchElementCenter = touchElementRect.top + touchElementRect.height / 2;
+                const target = allItems.find(item => {
+                  const rect = item.getBoundingClientRect();
+                  const itemCenter = rect.top + rect.height / 2;
+                  return Math.abs(touchY - itemCenter) < rect.height / 2 && item !== touchElement;
+                });
+                if (target) {
+                  const draggedIndex = allItems.indexOf(touchElement);
+                  const targetIndex = allItems.indexOf(target);
+                  if (draggedIndex < targetIndex) {
+                    target.after(touchElement);
+                  } else {
+                    target.before(touchElement);
+                  }
+                }
+              }
+            });
+            sortable.addEventListener('touchend', (e) => {
+              if (touchElement) {
+                touchElement.classList.remove('dragging');
+                answers = [...sortable.querySelectorAll('.sortable')].map(item => item.textContent);
+                saveAnswer();
+                touchElement = null;
+              }
+            });
           }
         </script>
       </body>
@@ -695,34 +967,29 @@ app.get('/test/question', checkAuth, (req, res) => {
   res.send(html);
 });
 
-app.post('/answer', checkAuth, (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin');
-  try {
-    const { index, answer } = req.body;
-    const userTest = userTests.get(req.user);
-    if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
-    userTest.answers[index] = answer;
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Ошибка в /answer:', error.stack);
-    res.status(500).json({ error: 'Помилка сервера' });
-  }
+app.post('/test/save-answer', checkAuth, (req, res) => {
+  const { index, answer } = req.body;
+  const userTest = userTests.get(req.user);
+  if (!userTest) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
+  userTest.answers[index] = answer;
+  res.json({ success: true });
 });
 
-app.get('/result', checkAuth, async (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin');
+app.get('/test/finish', checkAuth, async (req, res) => {
   const userTest = userTests.get(req.user);
-  if (!userTest) return res.status(400).json({ error: 'Тест не розпочато' });
+  if (!userTest) return res.status(400).send('Тест не розпочато');
 
-  const { questions, answers, testNumber, startTime } = userTest;
+  const { questions, testNumber, answers, startTime } = userTest;
   let score = 0;
-  const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
+  let totalPoints = 0;
 
   questions.forEach((q, index) => {
+    totalPoints += q.points;
     const userAnswer = answers[index];
+    let questionScore = 0;
     if (!q.options || q.options.length === 0) {
       if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
-        score += q.points;
+        questionScore = q.points;
       }
     } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
       const correctAnswers = q.correctAnswers.map(String);
@@ -730,52 +997,24 @@ app.get('/result', checkAuth, async (req, res) => {
       if (correctAnswers.length === userAnswers.length && 
           correctAnswers.every(val => userAnswers.includes(val)) && 
           userAnswers.every(val => correctAnswers.includes(val))) {
-        score += q.points;
+        questionScore = q.points;
       }
     } else if (q.type === 'ordering' && userAnswer && userAnswer.length > 0) {
       const correctAnswers = q.correctAnswers.map(String);
       const userAnswers = userAnswer.map(String);
       if (correctAnswers.length === userAnswers.length && 
           correctAnswers.every((val, idx) => val === userAnswers[idx])) {
-        score += q.points;
+        questionScore = q.points;
       }
     }
+    score += questionScore;
   });
 
   const endTime = Date.now();
   await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime);
+  userTests.delete(req.user);
 
-  const resultHtml = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Результати ${testNames[testNumber].name}</title>
-        <style>
-          body { font-size: 32px; margin: 20px; text-align: center; }
-          button { font-size: 32px; padding: 10px 20px; margin: 10px; }
-          @media (max-width: 1024px) {
-            body { font-size: 48px; }
-            button { font-size: 48px; padding: 15px 30px; margin: 15px; }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Результати ${testNames[testNumber].name}</h1>
-        <p>Ваш результат: ${score} з ${totalPoints}</p>
-        <button onclick="window.location.href='/results'">Переглянути результати</button>
-        <button onclick="window.location.href='/'">Повернутися на головну</button>
-      </body>
-    </html>
-  `;
-  res.send(resultHtml);
-});
-
-app.get('/results', checkAuth, async (req, res) => {
-  if (req.user === 'admin') return res.redirect('/admin');
-  const userTest = userTests.get(req.user);
-  let resultsHtml = `
+  res.send(`
     <!DOCTYPE html>
     <html>
       <head>
@@ -783,409 +1022,155 @@ app.get('/results', checkAuth, async (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Результати</title>
         <style>
-          body { font-size: 32px; margin: 20px; text-align: center; }
-          button { font-size: 32px; padding: 10px 20px; margin: 10px; }
+          body { 
+            font-size: 32px; 
+            margin: 20px; 
+            text-align: center; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            min-height: 100vh; 
+          }
+          h1 { 
+            margin-bottom: 20px; 
+          }
+          p { 
+            white-space: normal; 
+            word-wrap: break-word; 
+            margin: 10px 0; 
+          }
+          button { 
+            font-size: 32px; 
+            padding: 10px 20px; 
+            margin: 20px 0; 
+            width: 100%; 
+            max-width: 300px; 
+            border: none; 
+            border-radius: 5px; 
+            background-color: #007bff; 
+            color: white; 
+            cursor: pointer; 
+          }
+          button:hover { 
+            background-color: #0056b3; 
+          }
           @media (max-width: 1024px) {
-            body { font-size: 48px; }
-            button { font-size: 48px; padding: 15px 30px; margin: 15px; }
+            body { 
+              font-size: 48px; 
+              margin: 30px; 
+            }
+            h1 { 
+              font-size: 64px; 
+              margin-bottom: 30px; 
+            }
+            p { 
+              font-size: 48px; 
+              margin: 15px 0; 
+            }
+            button { 
+              font-size: 48px; 
+              padding: 15px 30px; 
+              max-width: 100%; 
+            }
           }
         </style>
       </head>
       <body>
         <h1>Результати</h1>
-  `;
-  
-  if (userTest) {
-    const { questions, answers, testNumber, startTime } = userTest;
-    let score = 0;
-    const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
-
-    questions.forEach((q, index) => {
-      const userAnswer = answers[index];
-      if (!q.options || q.options.length === 0) {
-        if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
-          score += q.points;
-        }
-      } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
-        const correctAnswers = q.correctAnswers.map(String);
-        const userAnswers = userAnswer.map(String);
-        if (correctAnswers.length === userAnswers.length && 
-            correctAnswers.every(val => userAnswers.includes(val)) && 
-            userAnswers.every(val => correctAnswers.includes(val))) {
-          score += q.points;
-        }
-      } else if (q.type === 'ordering' && userAnswer && userAnswer.length > 0) {
-        const correctAnswers = q.correctAnswers.map(String);
-        const userAnswers = userAnswer.map(String);
-        if (correctAnswers.length === userAnswers.length && 
-            correctAnswers.every((val, idx) => val === userAnswers[idx])) {
-          score += q.points;
-        }
-      }
-    });
-    const duration = Math.round((Date.now() - startTime) / 1000);
-    resultsHtml += `
-      <p>${testNames[testNumber].name}: ${score} з ${totalPoints}, тривалість: ${duration} сек</p>
-    `;
-    userTests.delete(req.user);
-  } else {
-    resultsHtml += '<p>Немає завершених тестів</p>';
-  }
-
-  resultsHtml += `
-        <button onclick="window.location.href='/'">Повернутися на головну</button>
-      </body>
-    </html>
-  `;
-  res.send(resultsHtml);
-});
-
-app.get('/admin', checkAuth, checkAdmin, (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Адмін-панель</title>
-        <style>
-          body { font-size: 24px; margin: 20px; }
-          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-          table { border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid black; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-          @media (max-width: 1024px) {
-            body { font-size: 36px; }
-            button { font-size: 36px; padding: 15px 30px; margin: 10px; }
-            th, td { font-size: 36px; padding: 12px; }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Адмін-панель</h1>
-        <button onclick="window.location.href='/admin/results'">Переглянути результати</button>
-        <button onclick="window.location.href='/admin/delete-results'">Видалити результати</button>
-        <button onclick="window.location.href='/admin/edit-tests'">Редагувати назви тестів</button>
-        <button onclick="window.location.href='/admin/create-test'">Створити новий тест</button>
-        <button onclick="window.location.href='/'">Повернутися на головну</button>
+        <p>Тест ${testNumber}: ${score} з ${totalPoints}, тривалість: ${Math.round((endTime - startTime) / 1000)} сек</p>
+        <button onclick="window.location.href='/select-test'">Повторить на голову</button>
       </body>
     </html>
   `);
 });
 
-app.get('/admin/results', checkAuth, checkAdmin, async (req, res) => {
-  let results = [];
-  let errorMessage = '';
+app.get('/admin', checkAuth, checkAdmin, async (req, res) => {
   try {
     if (!redisClient.isOpen) {
-      console.log('Redis not connected in /admin/results, attempting to reconnect...');
+      console.log('Redis not connected in /admin, attempting to reconnect...');
       await redisClient.connect();
-      console.log('Reconnected to Redis in /admin/results');
+      console.log('Reconnected to Redis in /admin');
     }
-    const keyType = await redisClient.type('test_results');
-    console.log('Type of test_results:', keyType);
-    if (keyType !== 'list' && keyType !== 'none') {
-      errorMessage = `Неверный тип данных для test_results: ${keyType}. Ожидается list.`;
-      console.error(errorMessage);
-    } else {
-      results = await redisClient.lRange('test_results', 0, -1);
-      console.log('Fetched results from Redis:', results);
-    }
-  } catch (fetchError) {
-    console.error('Ошибка при получении данных из Redis:', fetchError);
-    errorMessage = `Ошибка Redis: ${fetchError.message}`;
-  }
+    const results = await redisClient.lRange('test_results', 0, -1);
+    const parsedResults = results.map(r => JSON.parse(r));
 
-  let adminHtml = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Результати всіх користувачів</title>
-        <style>
-          body { font-size: 24px; margin: 20px; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td { border: 1px solid black; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-          .error { color: red; }
-          .answers { white-space: pre-wrap; max-width: 300px; overflow-wrap: break-word; line-height: 1.8; }
-          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-          @media (max-width: 1024px) {
-            body { font-size: 36px; }
-            th, td { font-size: 36px; padding: 12px; }
-            .answers { max-width: 400px; font-size: 36px; }
-            button { font-size: 36px; padding: 15px 30px; margin: 10px; }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Результати всіх користувачів</h1>
-  `;
-  if (errorMessage) {
-    adminHtml += `<p class="error">${errorMessage}</p>`;
-  }
-  adminHtml += `
-        <table>
-          <tr>
-            <th>Користувач</th>
-            <th>Тест</th>
-            <th>Очки</th>
-            <th>Максимум</th>
-            <th>Початок</th>
-            <th>Кінець</th>
-            <th>Тривалість (сек)</th>
-            <th>Відповіді та бали</th>
-          </tr>
-  `;
-  if (!results || results.length === 0) {
-    adminHtml += '<tr><td colspan="8">Немає результатів</td></tr>';
-    console.log('No results found in test_results');
-  } else {
-    results.forEach((result, index) => {
-      try {
-        const r = JSON.parse(result);
-        console.log(`Parsed result ${index}:`, r);
-        const answersDisplay = r.answers 
-          ? Object.entries(r.answers).map(([q, a], i) => 
-              `Питання ${parseInt(q) + 1}: ${Array.isArray(a) ? a.join(', ') : a} (${r.scoresPerQuestion[i] || 0} балів)`
-            ).join('\n')
-          : 'Немає відповідей';
-        const formatDateTime = (isoString) => {
-          if (!isoString) return 'N/A';
-          const date = new Date(isoString);
-          return `${date.toLocaleTimeString('uk-UA', { hour12: false })} ${date.toLocaleDateString('uk-UA')}`;
-        };
-        adminHtml += `
-          <tr>
-            <td>${r.user || 'N/A'}</td>
-            <td>${testNames[r.testNumber]?.name || 'N/A'}</td>
-            <td>${r.score || '0'}</td>
-            <td>${r.totalPoints || '0'}</td>
-            <td>${formatDateTime(r.startTime)}</td>
-            <td>${formatDateTime(r.endTime)}</td>
-            <td>${r.duration || 'N/A'}</td>
-            <td class="answers">${answersDisplay}</td>
-          </tr>
-        `;
-      } catch (parseError) {
-        console.error(`Ошибка парсинга результата ${index}:`, parseError, 'Raw data:', result);
-      }
-    });
-  }
-  adminHtml += `
-        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-      </body>
-    </html>
-  `;
-  res.send(adminHtml);
-});
-
-app.get('/admin/delete-results', checkAuth, checkAdmin, async (req, res) => {
-  try {
-    if (!redisClient.isOpen) {
-      await redisClient.connect();
-    }
-    await redisClient.del('test_results');
-    console.log('Test results deleted from Redis');
     res.send(`
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Видалено результати</title>
+          <title>Адмін панель</title>
           <style>
-            body { font-size: 24px; margin: 20px; text-align: center; }
-            button { font-size: 24px; padding: 10px 20px; margin: 5px; }
+            body { font-size: 16px; margin: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid black; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+            button { font-size: 16px; padding: 5px 10px; margin: 5px; }
             @media (max-width: 1024px) {
-              body { font-size: 36px; }
-              button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+              body { font-size: 24px; }
+              table { font-size: 24px; }
+              th, td { padding: 12px; }
+              button { font-size: 24px; padding: 10px 20px; }
             }
           </style>
         </head>
         <body>
-          <h1>Результати успішно видалено</h1>
-          <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    console.error('Ошибка при удалении результатов:', error.stack);
-    res.status(500).send('Помилка при видаленні результатів');
-  }
-});
-
-app.get('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Редагувати назви тестів</title>
-        <style>
-          body { font-size: 24px; margin: 20px; }
-          input { font-size: 24px; padding: 5px; margin: 5px; }
-          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-          label { font-size: 24px; }
-          @media (max-width: 1024px) {
-            body { font-size: 36px; }
-            input { font-size: 36px; padding: 10px; margin: 10px; width: 100%; box-sizing: border-box; }
-            button { font-size: 36px; padding: 15px 30px; margin: 10px; }
-            label { font-size: 36px; }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Редагувати назви та час тестів</h1>
-        <form method="POST" action="/admin/edit-tests">
-          ${Object.entries(testNames).map(([testNum, testData]) => `
-            <div>
-              <label for="test${testNum}">Назва Тесту ${testNum}:</label>
-              <input type="text" id="test${testNum}" name="test${testNum}" value="${testData.name}" required>
-              <label for="time${testNum}">Час (сек):</label>
-              <input type="number" id="time${testNum}" name="time${testNum}" value="${testData.timeLimit}" required min="1">
-            </div>
-          `).join('')}
-          <button type="submit">Зберегти</button>
-        </form>
-        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-      </body>
-    </html>
-  `);
-});
-
-app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
-  try {
-    Object.keys(testNames).forEach(testNum => {
-      const testName = req.body[`test${testNum}`];
-      const timeLimit = req.body[`time${testNum}`];
-      if (testName && timeLimit) {
-        testNames[testNum] = {
-          name: testName,
-          timeLimit: parseInt(timeLimit) || testNames[testNum].timeLimit
-        };
-      }
-    });
-    console.log('Updated test names and time limits:', testNames);
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Назви оновлено</title>
-          <style>
-            body { font-size: 24px; margin: 20px; text-align: center; }
-            button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-            @media (max-width: 1024px) {
-              body { font-size: 36px; }
-              button { font-size: 36px; padding: 15px 30px; margin: 10px; }
+          <h1>Адмін панель</h1>
+          <button onclick="window.location.href='/logout'">Вийти</button>
+          <h2>Результати тестів</h2>
+          <table>
+            <tr>
+              <th>Користувач</th>
+              <th>Тест</th>
+              <th>Бали</th>
+              <th>Максимум</th>
+              <th>Тривалість (сек)</th>
+              <th>Початок</th>
+              <th>Кінець</th>
+              <th>Відповіді</th>
+            </tr>
+            ${parsedResults.map(result => `
+              <tr>
+                <td>${result.user}</td>
+                <td>${result.testNumber}</td>
+                <td>${result.score}</td>
+                <td>${result.totalPoints}</td>
+                <td>${result.duration}</td>
+                <td>${result.startTime}</td>
+                <td>${result.endTime}</td>
+                <td>
+                  <button onclick="showAnswers('${encodeURIComponent(JSON.stringify(result.answers))}')">Показати відповіді</button>
+                </td>
+              </tr>
+            `).join('')}
+          </table>
+          <script>
+            function showAnswers(encodedAnswers) {
+              const answers = JSON.parse(decodeURIComponent(encodedAnswers));
+              let output = 'Відповіді:\\n';
+              for (const [question, answer] of Object.entries(answers)) {
+                output += \`Питання \${parseInt(question) + 1}: \${JSON.stringify(answer)}\\n\`;
+              }
+              alert(output);
             }
-          </style>
-        </head>
-        <body>
-          <h1>Назви та час тестів успішно оновлено</h1>
-          <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
+          </script>
         </body>
       </html>
     `);
   } catch (error) {
-    console.error('Ошибка при редактировании названий тестов:', error.stack);
-    res.status(500).send('Помилка при оновленні назв тестів');
+    console.error('Ошибка в /admin:', error.stack);
+    res.status(500).send('Помилка сервера');
   }
 });
 
-app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
-  const excelFiles = fs.readdirSync(__dirname).filter(file => file.endsWith('.xlsx') && file.startsWith('questions'));
-  console.log('Available Excel files:', excelFiles);
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Створити новий тест</title>
-        <style>
-          body { font-size: 24px; margin: 20px; }
-          input { font-size: 24px; padding: 5px; margin: 5px; }
-          select { font-size: 24px; padding: 5px; margin: 5px; }
-          button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-          label { font-size: 24px; }
-          @media (max-width: 1024px) {
-            body { font-size: 36px; }
-            input { font-size: 36px; padding: 10px; margin: 10px; width: 100%; box-sizing: border-box; }
-            select { font-size: 36px; padding: 10px; margin: 10px; width: 100%; }
-            button { font-size: 36px; padding: 15px 30px; margin: 10px; }
-            label { font-size: 36px; }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Створити новий тест</h1>
-        <form method="POST" action="/admin/create-test">
-          <div>
-            <label for="testName">Назва нового тесту:</label>
-            <input type="text" id="testName" name="testName" required>
-          </div>
-          <div>
-            <label for="timeLimit">Час (сек):</label>
-            <input type="number" id="timeLimit" name="timeLimit" value="3600" required min="1">
-          </div>
-          <div>
-            <label for="excelFile">Оберіть файл Excel з питаннями:</label>
-            <select id="excelFile" name="excelFile" required>
-              ${excelFiles.map(file => `<option value="${file}">${file}</option>`).join('')}
-            </select>
-          </div>
-          <button type="submit">Створити</button>
-        </form>
-        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-      </body>
-    </html>
-  `);
+app.get('/logout', (req, res) => {
+  res.clearCookie('auth');
+  res.clearCookie('savedPassword');
+  res.redirect('/');
 });
 
-app.post('/admin/create-test', checkAuth, checkAdmin, async (req, res) => {
-  try {
-    const { testName, excelFile, timeLimit } = req.body;
-    const match = excelFile.match(/^questions(\d+)\.xlsx$/);
-    if (!match) throw new Error('Невірний формат файлу Excel');
-    const testNumber = match[1];
-    if (testNames[testNumber]) throw new Error('Тест з таким номером вже існує');
-
-    testNames[testNumber] = {
-      name: testName,
-      timeLimit: parseInt(timeLimit) || 3600
-    };
-    console.log('Created new test:', { testNumber, testName, timeLimit, excelFile });
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Тест створено</title>
-          <style>
-            body { font-size: 24px; margin: 20px; text-align: center; }
-            button { font-size: 24px; padding: 10px 20px; margin: 5px; }
-            @media (max-width: 1024px) {
-              body { font-size: 36px; }
-              button { font-size: 36px; padding: 15px 30px; margin: 10px; }
-            }
-          </style>
-        </head>
-        <body>
-          <h1>Новий тест "${testName}" створено</h1>
-          <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    console.error('Ошибка при создании нового теста:', error.stack);
-    res.status(500).send(`Помилка при створенні тесту: ${error.message}`);
-  }
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
-
-module.exports = app;
