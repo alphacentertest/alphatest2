@@ -1,13 +1,18 @@
 {
   "name": "alphatest2",
   "version": "1.0.0",
-  "description": "Test application",
+  "description": "Simple password-protected app",
   "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
     "alphatest2": "file:",
+    "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
+    "dotenv": "^16.0.3",
     "exceljs": "^4.4.0",
     "express": "^4.18.2",
-    "redis": "^4.7.0"
+    "redis": "^4.6.5"
   }
 }

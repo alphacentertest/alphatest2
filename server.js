@@ -1,21 +1,65 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const path = require('path');
+const fs = require('fs'); // Исправлено: path заменено на fs
 const ExcelJS = require('exceljs');
 const { createClient } = require('redis');
-const fs = require('fs');
 const multer = require('multer');
 const { put, get } = require('@vercel/blob');
+const bcrypt = require('bcryptjs');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const { body, validationResult } = require('express-validator');
+const winston = require('winston');
+const path = require('path'); // Добавлено для корректной работы с путями
+require('dotenv').config(); // Загружаем переменные окружения
 
 const app = express();
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
 
 let validPasswords = {};
 let isInitialized = false;
 let initializationError = null;
-let testNames = { 
+let testNames = {
   '1': { name: 'Тест 1', timeLimit: 3600 },
   '2': { name: 'Тест 2', timeLimit: 3600 }
 };
+
+// Настройка логирования с помощью winston
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.File({ filename: 'error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'combined.log' }),
+    new winston.transports.Console()
+  ],
+});
+
+// Middleware для логирования запросов
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.url} - IP: ${req.ip}`);
+  next();
+});
+
+// Настройка базовых middleware
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(cookieParser());
+app.use(helmet()); // Настройка заголовков безопасности
+
+// Ограничение количества запросов (защита от брутфорса)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 минут
+  max: 100, // Максимум 100 запросов с одного IP
+  message: 'Слишком много попыток входа, попробуйте снова через 15 минут',
+});
+app.use('/login', loginLimiter);
 
 // Настройка multer для использования /tmp
 const storage = multer.diskStorage({
@@ -24,60 +68,105 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalName));
   }
 });
 
 const upload = multer({ storage: storage });
 
-/** Завантаження користувачів із файлу users.xlsx */
+// Настройка Redis-клиента
+const redisClient = createClient({
+  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808',
+  socket: {
+    connectTimeout: 10000,
+    reconnectStrategy: (retries) => {
+      if (retries > 5) {
+        logger.error('Redis: Too many reconnect attempts, giving up');
+        return new Error('Too many reconnect attempts');
+      }
+      return Math.min(retries * 500, 3000); // Задержка перед повторным подключением
+    },
+    tls: process.env.NODE_ENV === 'production', // Используем TLS в продакшене
+  }
+});
+
+redisClient.on('error', (err) => logger.error('Redis Client Error:', err));
+redisClient.on('connect', () => logger.info('Redis connected'));
+redisClient.on('reconnecting', () => logger.info('Redis reconnecting'));
+
+// Проверка и восстановление соединения с Redis
+const ensureRedisConnected = async () => {
+  if (!redisClient.isOpen) {
+    logger.info('Redis client is closed, attempting to reconnect...');
+    try {
+      await redisClient.connect();
+      logger.info('Redis reconnected successfully');
+    } catch (err) {
+      logger.error('Failed to reconnect to Redis:', err.message, err.stack);
+      throw err;
+    }
+  }
+};
+
+// Загрузка пользователей из Vercel Blob Storage и сохранение в Redis
 const loadUsers = async () => {
   try {
-    const filePath = path.join(__dirname, 'users.xlsx');
-    console.log('Attempting to load users from:', filePath);
-
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File users.xlsx not found at path: ${filePath}`);
-    }
-    console.log('File users.xlsx exists at:', filePath);
+    logger.info('Attempting to load users from Vercel Blob Storage...');
+    const blobUrl = 'https://qqeygegbb01p35fz.public.blob.vercel-storage.com/users-C2sivyAPoIF7lPXTbhfNjFMVyLNN5h.xlsx';
+    const response = await get(blobUrl);
+    const buffer = Buffer.from(await response.arrayBuffer());
 
     const workbook = new ExcelJS.Workbook();
-    console.log('Reading users.xlsx file...');
-    await workbook.xlsx.readFile(filePath);
-    console.log('File read successfully');
+    logger.info('Reading users.xlsx from Blob Storage...');
+    await workbook.xlsx.load(buffer);
+    logger.info('File read successfully');
 
     let sheet = workbook.getWorksheet('Users');
     if (!sheet) {
-      console.warn('Worksheet "Users" not found, trying "Sheet1"');
+      logger.warn('Worksheet "Users" not found, trying "Sheet1"');
       sheet = workbook.getWorksheet('Sheet1');
       if (!sheet) {
         throw new Error('Ни один из листов ("Users" или "Sheet1") не найден');
       }
     }
-    console.log('Worksheet found:', sheet.name);
+    logger.info('Worksheet found:', sheet.name);
 
     const users = {};
+    await ensureRedisConnected();
+    await redisClient.del('users'); // Очищаем старые данные
+
+    // Собираем пользователей в массив
+    const userRows = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber > 1) {
         const username = String(row.getCell(1).value || '').trim();
         const password = String(row.getCell(2).value || '').trim();
         if (username && password) {
-          users[username] = password;
+          userRows.push({ username, password });
         }
       }
     });
+
+    // Шифруем пароли и сохраняем в Redis
+    const saltRounds = 10;
+    for (const { username, password } of userRows) {
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
+      await redisClient.hSet('users', username, hashedPassword);
+      users[username] = password; // Для локального использования
+    }
+
     if (Object.keys(users).length === 0) {
       throw new Error('Не знайдено користувачів у файлі');
     }
-    console.log('Loaded users from Excel:', users);
+    logger.info('Loaded users and stored in Redis');
     return users;
   } catch (error) {
-    console.error('Error loading users from users.xlsx:', error.message, error.stack);
+    logger.error('Error loading users from Blob Storage:', error.message, error.stack);
     throw error;
   }
 };
 
-/** Завантаження питань для тесту */
+// Загрузка вопросов для теста
 const loadQuestions = async (testNumber) => {
   try {
     const questionsFileUrl = testNames[testNumber].questionsFileUrl;
@@ -85,7 +174,6 @@ const loadQuestions = async (testNumber) => {
       throw new Error(`Questions file URL for test ${testNumber} not found`);
     }
 
-    // Загружаем файл из Vercel Blob
     const response = await get(questionsFileUrl);
     const buffer = Buffer.from(await response.arrayBuffer());
 
@@ -113,12 +201,12 @@ const loadQuestions = async (testNumber) => {
     });
     return jsonData;
   } catch (error) {
-    console.error(`Ошибка в loadQuestions (test ${testNumber}):`, error.stack);
+    logger.error(`Ошибка в loadQuestions (test ${testNumber}):`, error.stack);
     throw error;
   }
 };
 
-/** Перевірка ініціалізації сервера */
+// Проверка инициализации сервера
 const ensureInitialized = (req, res, next) => {
   if (!isInitialized) {
     if (initializationError) {
@@ -129,47 +217,29 @@ const ensureInitialized = (req, res, next) => {
   next();
 };
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(cookieParser());
-
-/** Налаштування Redis-клієнта */
-const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808',
-  socket: {
-    connectTimeout: 10000,
-    reconnectStrategy: (retries) => Math.min(retries * 500, 3000)
-  }
-});
-
-redisClient.on('error', (err) => console.error('Redis Client Error:', err));
-redisClient.on('connect', () => console.log('Redis connected'));
-redisClient.on('reconnecting', () => console.log('Redis reconnecting'));
-
-/** Ініціалізація сервера */
+// Инициализация сервера
 const initializeServer = async () => {
   let attempt = 1;
   const maxAttempts = 5;
 
   while (attempt <= maxAttempts) {
     try {
-      console.log(`Starting server initialization (Attempt ${attempt} of ${maxAttempts})...`);
+      logger.info(`Starting server initialization (Attempt ${attempt} of ${maxAttempts})...`);
       validPasswords = await loadUsers();
-      console.log('Users loaded successfully:', validPasswords);
-      await redisClient.connect();
-      console.log('Connected to Redis and loaded users');
+      logger.info('Users loaded successfully:', Object.keys(validPasswords));
+      await ensureRedisConnected();
+      logger.info('Connected to Redis and loaded users');
       isInitialized = true;
       initializationError = null;
       break;
     } catch (err) {
-      console.error(`Failed to initialize server (Attempt ${attempt}):`, err.message, err.stack);
+      logger.error(`Failed to initialize server (Attempt ${attempt}):`, err.message, err.stack);
       initializationError = err;
       if (attempt < maxAttempts) {
-        console.log(`Retrying initialization in 5 seconds...`);
+        logger.info(`Retrying initialization in 5 seconds...`);
         await new Promise(resolve => setTimeout(resolve, 5000));
       } else {
-        console.error('Maximum initialization attempts reached. Server remains uninitialized.');
+        logger.error('Maximum initialization attempts reached. Server remains uninitialized.');
       }
       attempt++;
     }
@@ -183,39 +253,48 @@ const initializeServer = async () => {
 
 const CAMERA_MODE_KEY = 'camera_mode';
 const getCameraMode = async () => {
+  await ensureRedisConnected();
   const mode = await redisClient.get(CAMERA_MODE_KEY);
   return mode === 'enabled';
 };
 
 const setCameraMode = async (enabled) => {
+  await ensureRedisConnected();
   await redisClient.set(CAMERA_MODE_KEY, enabled ? 'enabled' : 'disabled');
 };
 
 (async () => {
-  const currentMode = await redisClient.get(CAMERA_MODE_KEY);
-  if (!currentMode) {
-    await setCameraMode(false);
+  try {
+    await ensureRedisConnected();
+    const currentMode = await redisClient.get(CAMERA_MODE_KEY);
+    if (!currentMode) {
+      await setCameraMode(false);
+    }
+  } catch (err) {
+    logger.error('Error initializing camera mode:', err.message, err.stack);
   }
 })();
 
 app.get('/favicon.*', (req, res) => {
-  res.status(404).send('Favicon not found');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-/** Головна сторінка з формою входу */
+// Главная страница с формой входа
 app.get('/', (req, res) => {
   const savedPassword = req.cookies.savedPassword || '';
+  res.set('Content-Type', 'text/html; charset=UTF-8');
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
   res.send(`
     <!DOCTYPE html>
-    <html>
+    <html lang="uk">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Вхід</title>
         <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
           body { 
             font-size: 32px; 
             margin: 0; 
@@ -225,6 +304,8 @@ app.get('/', (req, res) => {
             align-items: center; 
             min-height: 100vh; 
             box-sizing: border-box; 
+            font-family: Arial, sans-serif; 
+            background-color: #f0f0f0; 
           }
           .login-container { 
             text-align: center; 
@@ -233,6 +314,7 @@ app.get('/', (req, res) => {
           }
           h1 { 
             margin-bottom: 20px; 
+            color: red !important; 
           }
           input[type="password"], input[type="text"] { 
             font-size: 32px; 
@@ -240,6 +322,8 @@ app.get('/', (req, res) => {
             margin: 10px 0; 
             width: 100%; 
             box-sizing: border-box; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
           }
           button { 
             font-size: 32px; 
@@ -265,7 +349,7 @@ app.get('/', (req, res) => {
             width: 100%; 
           }
           .eye-icon { 
-            display: block;
+            display: block; 
             position: absolute; 
             right: 10px; 
             top: 50%; 
@@ -286,43 +370,15 @@ app.get('/', (req, res) => {
             height: 20px; 
           }
           @media (max-width: 1024px) {
-            body { 
-              font-size: 48px; 
-              padding: 30px; 
-            }
-            .login-container { 
-              max-width: 100%; 
-            }
-            h1 { 
-              font-size: 64px; 
-              margin-bottom: 30px; 
-            }
-            input[type="password"], input[type="text"] { 
-              font-size: 48px; 
-              padding: 15px; 
-              margin: 15px 0; 
-            }
-            button { 
-              font-size: 48px; 
-              padding: 15px 30px; 
-              margin: 15px 0; 
-            }
-            .eye-icon { 
-              font-size: 36px; 
-              right: 15px; 
-            }
-            .checkbox-container { 
-              font-size: 36px; 
-              gap: 15px; 
-            }
-            input[type="checkbox"] { 
-              width: 30px; 
-              height: 30px; 
-            }
-            .error { 
-              font-size: 36px; 
-              margin-top: 15px; 
-            }
+            body { font-size: 48px; padding: 30px; }
+            .login-container { max-width: 100%; }
+            h1 { font-size: 64px; margin-bottom: 30px; }
+            input[type="password"], input[type="text"] { font-size: 48px; padding: 15px; margin: 15px 0; }
+            button { font-size: 48px; padding: 15px 30px; margin: 15px 0; }
+            .eye-icon { font-size: 36px; right: 15px; }
+            .checkbox-container { font-size: 36px; gap: 15px; }
+            input[type="checkbox"] { width: 30px; height: 30px; }
+            .error { font-size: 36px; margin-top: 15px; }
           }
         </style>
       </head>
@@ -336,7 +392,7 @@ app.get('/', (req, res) => {
             </div>
             <div class="checkbox-container">
               <input type="checkbox" id="rememberMe" name="rememberMe">
-              <label for="rememberMe">Запомнить меня</label>
+              <label for="rememberMe">Запам'ятати мене</label>
             </div>
             <button type="submit">Увійти</button>
           </form>
@@ -378,70 +434,115 @@ app.get('/', (req, res) => {
   `);
 });
 
-/** Обробка входу користувача */
-app.post('/login', async (req, res) => {
-  try {
+// Обработка входа пользователя с валидацией
+app.post(
+  '/login',
+  [
+    body('password')
+      .trim()
+      .notEmpty()
+      .withMessage('Пароль не может быть пустым')
+      .isLength({ min: 3, max: 50 })
+      .withMessage('Пароль должен быть от 3 до 50 символов'),
+    body('rememberMe').isBoolean().withMessage('rememberMe должен быть булевым значением'),
+  ],
+  async (req, res) => {
+    // Проверка ошибок валидации
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn('Validation errors:', errors.array());
+      return res.status(400).json({ success: false, message: errors.array()[0].msg });
+    }
+
     const { password, rememberMe } = req.body;
-    if (!password) return res.status(400).json({ success: false, message: 'Пароль не вказано' });
-    console.log('Checking password:', password, 'against validPasswords:', validPasswords);
-    const user = Object.keys(validPasswords).find(u => validPasswords[u] === password.trim());
-    if (!user) return res.status(401).json({ success: false, message: 'Невірний пароль' });
+    logger.info(`Checking password for user input`);
 
-    res.cookie('auth', user, {
-      maxAge: 24 * 60 * 60 * 1000,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax'
-    });
+    try {
+      await ensureRedisConnected();
+      const users = await redisClient.hGetAll('users');
 
-    if (rememberMe) {
-      res.cookie('savedPassword', password, {
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        httpOnly: false,
+      let authenticatedUser = null;
+      for (const [username, hashedPassword] of Object.entries(users)) {
+        if (await bcrypt.compare(password.trim(), hashedPassword)) {
+          authenticatedUser = username;
+          break;
+        }
+      }
+
+      if (!authenticatedUser) {
+        logger.warn(`Failed login attempt with password`);
+        return res.status(401).json({ success: false, message: 'Невірний пароль' });
+      }
+
+      // Устанавливаем cookie auth
+      res.cookie('auth', authenticatedUser, {
+        maxAge: 24 * 60 * 60 * 1000,
+        httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax'
       });
-    } else {
-      res.clearCookie('savedPassword');
-    }
 
-    if (user === 'admin') {
-      res.json({ success: true, redirect: '/admin' });
-    } else {
-      res.json({ success: true, redirect: '/select-test' });
+      if (rememberMe) {
+        res.cookie('savedPassword', password, {
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+          httpOnly: false,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax'
+        });
+      } else {
+        res.clearCookie('savedPassword');
+      }
+
+      logger.info(`Successful login for user: ${authenticatedUser}`);
+      if (authenticatedUser === 'admin') {
+        res.json({ success: true, redirect: '/admin' });
+      } else {
+        res.json({ success: true, redirect: '/select-test' });
+      }
+    } catch (error) {
+      logger.error('Error during login:', error);
+      res.status(500).json({ success: false, message: 'Помилка сервера' });
     }
-  } catch (error) {
-    console.error('Ошибка в /login:', error.stack);
-    res.status(500).json({ success: false, message: 'Помилка сервера' });
   }
-});
+);
 
-/** Перевірка автентифікації */
-const checkAuth = (req, res, next) => {
+// Проверка аутентификации
+const checkAuth = async (req, res, next) => {
   const user = req.cookies.auth;
-  console.log('checkAuth: user from cookies:', user);
-  if (!user || !validPasswords[user]) {
-    console.log('checkAuth: No valid auth cookie, redirecting to /');
+  logger.info('checkAuth: user from cookies:', user);
+  if (!user) {
+    logger.info('checkAuth: No auth cookie, redirecting to /');
     return res.redirect('/');
   }
-  console.log('checkAuth: User authenticated, proceeding...');
-  req.user = user;
-  next();
+
+  try {
+    await ensureRedisConnected();
+    const hashedPassword = await redisClient.hGet('users', user);
+    if (!hashedPassword) {
+      logger.info('checkAuth: User not found in Redis, redirecting to /');
+      return res.redirect('/');
+    }
+    req.user = user;
+    next();
+  } catch (error) {
+    logger.error('Error in checkAuth:', error);
+    res.status(500).send('Помилка сервера');
+  }
 };
 
-/** Перевірка прав адміністратора */
+// Проверка прав администратора
 const checkAdmin = (req, res, next) => {
-  const user = req.cookies.auth;
-  console.log('checkAdmin: user from cookies:', user);
+  const user = String(req.cookies.auth).trim();
+  logger.info('checkAdmin: user from cookies:', user, 'type:', typeof user);
   if (user !== 'admin') {
-    console.log('checkAdmin: Not admin, returning 403');
+    logger.info('checkAdmin: Not admin, returning 403');
     return res.status(403).send('Доступно тільки для адміністратора (403 Forbidden)');
   }
-  console.log('checkAdmin: Admin access granted, proceeding...');
+  logger.info('checkAdmin: Admin access granted, proceeding...');
   next();
 };
 
-/** Сторінка вибору тесту */
+// Страница выбора теста
 app.get('/select-test', checkAuth, (req, res) => {
   if (req.user === 'admin') return res.redirect('/admin');
   res.send(`
@@ -507,44 +608,43 @@ app.get('/select-test', checkAuth, (req, res) => {
   `);
 });
 
-/** Отримання даних тесту користувача */
+// Получение данных теста пользователя
 const getUserTest = async (user) => {
+  await ensureRedisConnected();
   const userTestData = await redisClient.get(`user_test:${user}`);
   if (!userTestData) return null;
   return JSON.parse(userTestData);
 };
 
-/** Збереження даних тесту користувача */
+// Сохранение данных теста пользователя
 const setUserTest = async (user, userTest) => {
+  await ensureRedisConnected();
   await redisClient.set(`user_test:${user}`, JSON.stringify(userTest));
 };
 
-/** Видалення даних тесту користувача */
+// Удаление данных теста пользователя
 const deleteUserTest = async (user) => {
+  await ensureRedisConnected();
   await redisClient.del(`user_test:${user}`);
 };
 
-/** Форматування тривалості */
+// Форматирование длительности
 const formatDuration = (duration) => {
   const minutes = Math.floor(duration / 60);
   const seconds = duration % 60;
   return `${minutes} хв ${seconds} с`;
 };
 
-/** Збереження результатів тесту */
+// Сохранение результатов теста
 const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousBehavior) => {
   try {
-    if (!redisClient.isOpen) {
-      console.log('Redis not connected in saveResult, attempting to reconnect...');
-      await redisClient.connect();
-      console.log('Reconnected to Redis in saveResult');
-    }
+    await ensureRedisConnected();
     const keyType = await redisClient.type('test_results');
-    console.log('Type of test_results before save:', keyType);
+    logger.info('Type of test_results before save:', keyType);
     if (keyType !== 'list' && keyType !== 'none') {
-      console.log('Incorrect type detected, clearing test_results');
+      logger.info('Incorrect type detected, clearing test_results');
       await redisClient.del('test_results');
-      console.log('test_results cleared, new type:', await redisClient.type('test_results'));
+      logger.info('test_results cleared, new type:', await redisClient.type('test_results'));
     }
 
     const userTest = await getUserTest(user);
@@ -589,16 +689,16 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       scoresPerQuestion,
       suspiciousBehavior: suspiciousBehavior || 0
     };
-    console.log('Saving result to Redis:', result);
+    logger.info('Saving result to Redis:', result);
     await redisClient.lPush('test_results', JSON.stringify(result));
-    console.log(`Successfully saved result for ${user} in Redis`);
+    logger.info(`Successfully saved result for ${user} in Redis`);
   } catch (error) {
-    console.error('Ошибка сохранения в Redis:', error.stack);
+    logger.error('Ошибка сохранения в Redis:', error.stack);
     throw error;
   }
 };
 
-/** Початок тесту */
+// Начало теста
 app.get('/test', checkAuth, async (req, res) => {
   if (req.user === 'admin') return res.redirect('/admin');
   const testNumber = req.query.test;
@@ -617,12 +717,12 @@ app.get('/test', checkAuth, async (req, res) => {
     await setUserTest(req.user, userTest);
     res.redirect(`/test/question?index=0`);
   } catch (error) {
-    console.error('Ошибка в /test:', error.stack);
+    logger.error('Ошибка в /test:', error.stack);
     res.status(500).send('Помилка при завантаженні тесту');
   }
 });
 
-/** Відображення питання тесту */
+// Отображение вопроса теста
 app.get('/test/question', checkAuth, async (req, res) => {
   if (req.user === 'admin') return res.redirect('/admin');
   const userTest = await getUserTest(req.user);
@@ -638,7 +738,7 @@ app.get('/test/question', checkAuth, async (req, res) => {
   userTest.currentQuestion = index;
   await setUserTest(req.user, userTest);
   const q = questions[index];
-  console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
+  logger.info('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
 
   const progress = Array.from({ length: questions.length }, (_, i) => {
     const answer = answers[i];
@@ -737,7 +837,7 @@ app.get('/test/question', checkAuth, async (req, res) => {
           button { 
             font-size: 32px; 
             padding: 10px 20px; 
-            border: none; 
+            border: none;
             border-radius: 5px; 
             cursor: pointer; 
             flex: 1; 
@@ -942,7 +1042,7 @@ app.get('/test/question', checkAuth, async (req, res) => {
   `);
 });
 
-/** Збереження відповіді на питання */
+// Сохранение ответа на вопрос
 app.post('/test/save-answer', checkAuth, async (req, res) => {
   const userTest = await getUserTest(req.user);
   if (!userTest) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
@@ -964,7 +1064,7 @@ app.post('/test/save-answer', checkAuth, async (req, res) => {
   }
 });
 
-/** Оновлення підозрілої поведінки */
+// Обновление подозрительного поведения
 app.post('/test/update-suspicious', checkAuth, async (req, res) => {
   const userTest = await getUserTest(req.user);
   if (!userTest) return res.status(400).json({ success: false, message: 'Тест не розпочато' });
@@ -974,7 +1074,7 @@ app.post('/test/update-suspicious', checkAuth, async (req, res) => {
   res.json({ success: true });
 });
 
-/** Завершення тесту */
+// Завершение теста
 app.get('/test/finish', checkAuth, async (req, res) => {
   const userTest = await getUserTest(req.user);
   if (!userTest) return res.status(400).send('Тест не розпочато');
@@ -1084,9 +1184,10 @@ app.get('/test/finish', checkAuth, async (req, res) => {
   `);
 });
 
-/** Адмін-панель */
+// Админ-панель
 app.get('/admin', checkAdmin, async (req, res) => {
   try {
+    await ensureRedisConnected();
     const results = await redisClient.lRange('test_results', 0, -1);
     const parsedResults = results.map(r => JSON.parse(r));
     const questionsByTest = {};
@@ -1094,7 +1195,7 @@ app.get('/admin', checkAdmin, async (req, res) => {
       const testNumber = result.testNumber;
       if (!questionsByTest[testNumber]) {
         questionsByTest[testNumber] = await loadQuestions(testNumber).catch(err => {
-          console.error(`Ошибка загрузки вопросов для теста ${testNumber}:`, err.stack);
+          logger.error(`Ошибка загрузки вопросов для теста ${testNumber}:`, err.stack);
           return [];
         });
       }
@@ -1188,24 +1289,24 @@ app.get('/admin', checkAdmin, async (req, res) => {
       </html>
     `);
   } catch (error) {
-    console.error('Ошибка в /admin:', error.stack);
+    logger.error('Ошибка в /admin:', error.stack);
     res.status(500).send('Помилка сервера');
   }
 });
 
-/** Перемикання режиму камери */
+// Переключение режима камеры
 app.post('/admin/toggle-camera', checkAdmin, async (req, res) => {
   try {
     const currentMode = await getCameraMode();
     await setCameraMode(!currentMode);
     res.json({ success: true });
   } catch (error) {
-    console.error('Ошибка в /admin/toggle-camera:', error.stack);
+    logger.error('Ошибка в /admin/toggle-camera:', error.stack);
     res.status(500).json({ success: false, message: 'Помилка сервера' });
   }
 });
 
-/** Сторінка створення тесту */
+// Страница создания теста
 app.get('/admin/create-test', checkAdmin, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -1236,7 +1337,7 @@ app.get('/admin/create-test', checkAdmin, (req, res) => {
   `);
 });
 
-/** Обробка створення тесту */
+// Обработка создания теста
 app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async (req, res) => {
   try {
     const { testName, timeLimit } = req.body;
@@ -1249,29 +1350,25 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
     const newTestNumber = String(Object.keys(testNames).length + 1);
     testNames[newTestNumber] = { name: testName, timeLimit: parseInt(timeLimit) };
 
-    // Загружаем файл в Vercel Blob с обработкой ошибок
     let blob;
     try {
       blob = await put(`questions${newTestNumber}.xlsx`, fs.readFileSync(file.path), { access: 'public' });
     } catch (blobError) {
-      console.error('Ошибка при загрузке в Vercel Blob:', blobError);
+      logger.error('Ошибка при загрузке в Vercel Blob:', blobError);
       throw new Error('Не удалось загрузить файл в хранилище');
     }
 
-    // Сохраняем URL файла
     testNames[newTestNumber].questionsFileUrl = blob.url;
-
-    // Удаляем временный файл из /tmp
     fs.unlinkSync(file.path);
 
     res.redirect('/admin');
   } catch (error) {
-    console.error('Ошибка при создании теста:', error.stack);
+    logger.error('Ошибка при создании теста:', error.stack);
     res.status(500).send('Помилка сервера');
   }
 });
 
-/** Сторінка редагування тестів */
+// Страница редактирования тестов
 app.get('/admin/edit-tests', checkAdmin, (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -1316,23 +1413,24 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
   `);
 });
 
-/** Обробка редагування тесту */
+// Обработка редактирования теста
 app.post('/admin/edit-test', checkAdmin, async (req, res) => {
   try {
     const { testNumber, testName, timeLimit } = req.body;
     if (!testNames[testNumber]) return res.status(404).json({ success: false, message: 'Тест не знайдено' });
 
-    testNames[testNumber] = { name: testName, timeLimit: parseInt(timeLimit) };
+    testNames[testNumber] = { name: testName, timeLimit: parseInt(timeLimit), questionsFileUrl: testNames[testNumber].questionsFileUrl };
     res.json({ success: true });
   } catch (error) {
-    console.error('Ошибка в /admin/edit-test:', error.stack);
+    logger.error('Ошибка в /admin/edit-test:', error.stack);
     res.status(500).json({ success: false, message: 'Помилка сервера' });
   }
 });
 
-/** Перегляд результатів тестів */
+// Перегляд результатов тестов
 app.get('/admin/view-results', checkAdmin, async (req, res) => {
   try {
+    await ensureRedisConnected();
     const results = await redisClient.lRange('test_results', 0, -1);
     const parsedResults = results.map(r => JSON.parse(r));
     const questionsByTest = {};
@@ -1340,7 +1438,7 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
       const testNumber = result.testNumber;
       if (!questionsByTest[testNumber]) {
         questionsByTest[testNumber] = await loadQuestions(testNumber).catch(err => {
-          console.error(`Ошибка загрузки вопросов для теста ${testNumber}:`, err.stack);
+          logger.error(`Ошибка загрузки вопросов для теста ${testNumber}:`, err.stack);
           return [];
         });
       }
@@ -1367,78 +1465,175 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
         <body>
           <h1>Перегляд результатів тестів</h1>
           <table>
-            <thead>
+           <thead>
+            <tr>
+              <th>Користувач</th>
+              <th>Тест</th>
+              <th>Результат</th>
+              <th>Тривалість</th>
+              <th>Підозріла активність</th>
+              <th>Дата</th>
+              <th>Дії</th>
+            </tr>
+           </thead>
+        <tbody>
+            ${parsedResults.map((result, idx) => `
               <tr>
-                <th>Користувач</th>
-                <th>Тест</th>
-                <th>Результат</th>
-                <th>Тривалість</th>
-                <th>Підозріла активність</th>
-                <th>Дата</th>
-                <th>Дії</th>
+                <td>${result.user}</td>
+                <td>${testNames[result.testNumber]?.name || 'Невідомий тест'}</td>
+                <td>${result.score} / ${result.totalPoints}</td>
+                <td>${formatDuration(result.duration)}</td>
+                <td>${Math.round((result.suspiciousBehavior / (result.duration || 1)) * 100)}%</td>
+                <td>${new Date(result.endTime).toLocaleString()}</td>
+                <td><button onclick="showAnswers(${idx})">Показати відповіді</button></td>
               </tr>
-            </thead>
-            <tbody>
-              ${parsedResults.map((result, idx) => `
-                <tr>
-                  <td>${result.user}</td>
-                  <td>${testNames[result.testNumber]?.name || 'Невідомий тест'}</td>
-                  <td>${result.score} / ${result.totalPoints}</td>
-                  <td>${formatDuration(result.duration)}</td>
-                  <td>${Math.round((result.suspiciousBehavior / (result.duration || 1)) * 100)}%</td>
-                  <td>${new Date(result.endTime).toLocaleString()}</td>
-                  <td><button onclick="showAnswers(${idx})">Показати відповіді</button></td>
-                </tr>
-                <tr id="answers-${idx}" class="answers">
-                  <td colspan="7">
-                    ${Object.entries(result.answers).map(([qIdx, answer]) => {
-                      const question = result.scoresPerQuestion[qIdx] && questionsByTest[result.testNumber][qIdx] ? questionsByTest[result.testNumber][qIdx] : null;
-                      return question ? `
-                        <p>Питання ${parseInt(qIdx) + 1}: ${question.text}</p>
-                        <p>Відповідь: ${Array.isArray(answer) ? answer.join(', ') : answer}</p>
-                        <p>Бали: ${result.scoresPerQuestion[qIdx]} / ${question.points}</p>
-                      ` : '';
-                    }).join('')}
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          <button onclick="window.location.href='/admin'">Повернутися</button>
-          <script>
-            function showAnswers(index) {
-              const answersDiv = document.getElementById('answers-' + index);
-              answersDiv.style.display = answersDiv.style.display === 'none' || !answersDiv.style.display ? 'block' : 'none';
-            }
-          </script>
-        </body>
-      </html>
+              <tr id="answers-${idx}" class="answers">
+                <td colspan="7">
+                  ${Object.entries(result.answers).map(([qIdx, answer]) => {
+                    const question = result.scoresPerQuestion[qIdx] && questionsByTest[result.testNumber][qIdx] ? questionsByTest[result.testNumber][qIdx] : null;
+                    return question ? `
+                      <p>Питання ${parseInt(qIdx) + 1}: ${question.text}</p>
+                      <p>Відповідь: ${Array.isArray(answer) ? answer.join(', ') : answer}</p>
+                      <p>Бали: ${result.scoresPerQuestion[qIdx]} / ${question.points}</p>
+                    ` : '';
+                  }).join('')}
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <button onclick="window.location.href='/admin'" style="margin-top: 20px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer;">Повернутися</button>
+        <script>
+          function showAnswers(index) {
+            const answersDiv = document.getElementById('answers-' + index);
+            answersDiv.style.display = answersDiv.style.display === 'none' || !answersDiv.style.display ? 'block' : 'none';
+          }
+        </script>
+      </body>
+    </html>
     `);
   } catch (error) {
-    console.error('Ошибка в /admin/view-results:', error.stack);
+    logger.error('Ошибка в /admin/view-results:', error.stack);
     res.status(500).send('Помилка сервера');
   }
 });
 
-/** Видалення результатів тестів */
+// Удаление результатов тестов
 app.post('/admin/delete-results', checkAdmin, async (req, res) => {
   try {
+    await ensureRedisConnected();
     await redisClient.del('test_results');
+    logger.info('Все результаты тестов удалены');
     res.json({ success: true });
   } catch (error) {
-    console.error('Ошибка в /admin/delete-results:', error.stack);
+    logger.error('Ошибка в /admin/delete-results:', error.stack);
     res.status(500).json({ success: false, message: 'Помилка сервера' });
   }
 });
 
-/** Глобальний обробник помилок */
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err.stack);
-  res.status(500).send('Помилка сервера');
+// Выход из системы
+app.get('/logout', (req, res) => {
+  res.clearCookie('auth');
+  res.clearCookie('savedPassword');
+  logger.info('User logged out');
+  res.redirect('/');
 });
 
-/** Запуск сервера */
+// Обработка ошибок 404
+app.use((req, res) => {
+  logger.warn(`404 Not Found: ${req.method} ${req.url}`);
+  res.status(404).send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>404 - Сторінка не знайдена</title>
+        <style>
+          body { font-size: 32px; margin: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+          h1 { margin-bottom: 20px; }
+          button { font-size: 32px; padding: 10px 20px; margin: 20px; width: 100%; max-width: 300px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+          button:hover { background-color: #0056b3; }
+          @media (max-width: 1024px) {
+            body { font-size: 48px; margin: 30px; }
+            h1 { font-size: 64px; margin-bottom: 30px; }
+            button { font-size: 48px; padding: 15px 30px; margin: 30px; max-width: 100%; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>404 - Сторінка не знайдена</h1>
+        <button onclick="window.location.href='/'">Повернутися на головну</button>
+      </body>
+    </html>
+  `);
+});
+
+// Глобальный обработчик ошибок
+app.use((err, req, res, next) => {
+  logger.error('Unhandled error:', err.stack);
+  res.status(500).send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>500 - Помилка сервера</title>
+        <style>
+          body { font-size: 32px; margin: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+          h1 { margin-bottom: 20px; }
+          button { font-size: 32px; padding: 10px 20px; margin: 20px; width: 100%; max-width: 300px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+          button:hover { background-color: #0056b3; }
+          @media (max-width: 1024px) {
+            body { font-size: 48px; margin: 30px; }
+            h1 { font-size: 64px; margin-bottom: 30px; }
+            button { font-size: 48px; padding: 15px 30px; margin: 30px; max-width: 100%; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>500 - Помилка сервера</h1>
+        <button onclick="window.location.href='/'">Повернутися на головну</button>
+      </body>
+    </html>
+  `);
+});
+
+// Запуск сервера
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  logger.info(`Server is running on port ${PORT}`);
+});
+
+// Обработка завершения процесса
+process.on('SIGTERM', async () => {
+  logger.info('Received SIGTERM, shutting down gracefully...');
+  try {
+    await redisClient.quit();
+    logger.info('Redis connection closed');
+  } catch (err) {
+    logger.error('Error closing Redis connection:', err.stack);
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  logger.info('Received SIGINT, shutting down gracefully...');
+  try {
+    await redisClient.quit();
+    logger.info('Redis connection closed');
+  } catch (err) {
+    logger.error('Error closing Redis connection:', err.stack);
+  }
+  process.exit(0);
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
