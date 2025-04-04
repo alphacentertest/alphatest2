@@ -83,7 +83,7 @@ const s3 = new AWS.S3({
 const BLOB_BASE_URL = process.env.BLOB_BASE_URL || 'https://qqeygegbb01p35fz.public.blob.vercel-storage.com';
 
 // Настройка middleware
-app.set('trust proxy', true); // Для Vercel
+app.set('trust proxy', 1); // Для Vercel
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
