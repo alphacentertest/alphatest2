@@ -64,7 +64,7 @@ const loadUsers = async () => {
   }
 };
 
-/ Настройка S3
+// Настройка S3
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -235,7 +235,7 @@ const setCameraMode = async (enabled) => {
 })();
 
 // Обработчик для favicon
-app.get('/favicon.*', (req, res) => {
+aapp.get('/favicon.ico', (req, res) => {
   res.status(404).send('Favicon not found');
 });
 
