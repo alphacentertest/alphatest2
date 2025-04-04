@@ -6,6 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const Redis = require('ioredis'); // Используем ioredis вместо redis
 const AWS = require('aws-sdk');
+const azureToken = process.env.AZURE_TOKEN;
+require('dotenv').config();
 
 // Инициализация приложения
 const app = express();
