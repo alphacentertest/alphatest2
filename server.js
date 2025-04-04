@@ -412,43 +412,82 @@ app.get('/', async (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Вхід</title>
         <style>
-          body { font-size: 16px; margin: 20px; }
-          h1 { font-size: 24px; margin-bottom: 20px; }
-          form { max-width: 300px; }
-          label { display: block; margin: 10px 0 5px; }
-          input[type="text"], input[type="password"] { font-size: 16px; padding: 5px; width: 100%; box-sizing: border-box; }
-          button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; margin-top: 10px; }
-          button:hover { background-color: #0056b3; }
-          .error { color: red; margin-top: 10px; }
-          .password-container { position: relative; }
-          .eye-icon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; }
+          body { 
+            font-size: 16px; 
+            margin: 20px; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+          }
+          h1 { 
+            font-size: 24px; 
+            margin-bottom: 20px; 
+            text-align: center; 
+          }
+          form { 
+            max-width: 300px; 
+            width: 100%; 
+          }
+          label { 
+            display: block; 
+            margin: 10px 0 5px; 
+          }
+          input[type="text"], input[type="password"] { 
+            font-size: 16px; 
+            padding: 5px; 
+            width: 100%; 
+            box-sizing: border-box; 
+          }
+          #password { 
+            background-color: #d3d3d3; /* Серый фон */
+          }
+          button { 
+            font-size: 16px; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 5px; 
+            background-color: #007bff; 
+            color: white; 
+            cursor: pointer; 
+            margin-top: 10px; 
+            display: block; /* Делаем кнопку блочной */
+            width: 100%; /* Кнопка на всю ширину формы */
+          }
+          button:hover { 
+            background-color: #0056b3; 
+          }
+          .error { 
+            color: red; 
+            margin-top: 10px; 
+            text-align: center; 
+          }
+          .password-container { 
+            position: relative; 
+          }
+          .eye-icon { 
+            position: absolute; 
+            right: 10px; 
+            top: 50%; 
+            transform: translateY(-50%); 
+            cursor: pointer; 
+          }
         </style>
       </head>
       <body>
-        <h1>Вхід</h1>
-        <form action="/login" method="POST">
-          <label>Пароль:</label>
-          <div class="password-container">
-            <input type="password" id="password" name="password" value="${savedPassword}" required>
-            <span class="eye-icon" onclick="togglePassword()">👁️</span>
-          </div>
-          <label><input type="checkbox" name="rememberMe"> Запам'ятати пароль</label>
-          <button type="submit">Увійти</button>
-        </form>
-        <p id="error" class="error"></p>
-        <script>
-          function togglePassword() {
-            const passwordInput = document.getElementById('password');
-            const eyeIcon = document.querySelector('.eye-icon');
-            if (passwordInput.type === 'password') {
-              passwordInput.type = 'text';
-              eyeIcon.textContent = '🙈';
-            } else {
-              passwordInput.type = 'password';
-              eyeIcon.textContent = '👁️';
-            }
-          }
-        </script>
+        <div>
+          <h1>Вхід</h1>
+          <form action="/login" method="POST">
+            <label>Пароль:</label>
+            <div class="password-container">
+              <input type="password" id="password" name="password" value="${savedPassword}" required>
+              <span class="eye-icon" onclick="togglePassword()">👁️</span>
+            </div>
+            <label><input type="checkbox" name="rememberMe"> Запам'ятати пароль</label>
+            <button type="submit">Увійти</button>
+          </form>
+          <p id="error" class="error"></p>
+        </div>
       </body>
     </html>
   `);
