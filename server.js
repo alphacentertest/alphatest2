@@ -38,26 +38,23 @@ app.use((req, res, next) => {
 });
 
 // Настройка Redis с ioredis
-const redisClient = new Redis({
-  host: process.env.REDIS_HOST || 'redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com',
-  port: process.env.REDIS_PORT || 13808,
-  password: process.env.REDIS_PASSWORD || 'BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3',
-  connectTimeout: 20000,
-  retryStrategy: (times) => {
-    if (times > 10) {
-      logger.error('Redis: Too many reconnect attempts, giving up');
-      return new Error('Too many reconnect attempts');
-    }
-    logger.info(`Redis reconnect attempt ${times}`);
-    return Math.min(times * 500, 3000);
+const redis = new Redis({
+  host: process.env.REDIS_HOST || 'localhost',
+  port: process.env.REDIS_PORT || 6379,
+  password: process.env.REDIS_PASSWORD || undefined,
+  connectTimeout: 10000, // 10 секунд
+  retryStrategy(times) {
+    return Math.min(times * 50, 2000);
   },
-  enableTLSForSentinelMode: false,
-  tls: false, // Отключаем TLS для устранения ошибки SSL
 });
 
-redisClient.on('error', (err) => logger.error('Redis Client Error:', err));
-redisClient.on('connect', () => logger.info('Redis connected'));
-redisClient.on('reconnecting', () => logger.info('Redis reconnecting'));
+redis.on('connect', () => {
+  logger.info('Redis connected successfully');
+});
+redis.on('reconnecting', () => {
+  logger.warn('Redis reconnecting...');
+});
+
 
 const ensureRedisConnected = async () => {
   if (!redisClient.status || redisClient.status === 'close') {
@@ -414,11 +411,21 @@ app.get('/', async (req, res) => {
         <style>
           body { 
             font-size: 16px; 
-            margin: 20px; 
+            margin: 0; /* Убираем margin, чтобы не было лишних отступов */
             display: flex; 
             justify-content: center; 
             align-items: center; 
-            min-height: 100vh; 
+            min-height: 100vh; /* Полная высота экрана */
+            flex-direction: column; /* Устанавливаем направление колонкой */
+          }
+          .container { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            width: 100%; 
+            max-width: 400px; /* Ограничиваем ширину контейнера */
+            padding: 20px; 
+            box-sizing: border-box; 
           }
           h1 { 
             font-size: 24px; 
@@ -426,8 +433,8 @@ app.get('/', async (req, res) => {
             text-align: center; 
           }
           form { 
+            width: 100%; /* Форма занимает всю ширину контейнера */
             max-width: 300px; 
-            width: 100%; 
           }
           label { 
             display: block; 
@@ -451,8 +458,8 @@ app.get('/', async (req, res) => {
             color: white; 
             cursor: pointer; 
             margin-top: 10px; 
-            display: block; /* Делаем кнопку блочной */
-            width: 100%; /* Кнопка на всю ширину формы */
+            display: block; 
+            width: 100%; 
           }
           button:hover { 
             background-color: #0056b3; 
@@ -475,7 +482,7 @@ app.get('/', async (req, res) => {
         </style>
       </head>
       <body>
-        <div>
+        <div class="container">
           <h1>Вхід</h1>
           <form action="/login" method="POST">
             <label>Пароль:</label>
