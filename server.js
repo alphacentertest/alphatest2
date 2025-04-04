@@ -411,19 +411,19 @@ app.get('/', async (req, res) => {
         <style>
           body { 
             font-size: 16px; 
-            margin: 0; /* Убираем margin, чтобы не было лишних отступов */
+            margin: 0; 
             display: flex; 
             justify-content: center; 
             align-items: center; 
-            min-height: 100vh; /* Полная высота экрана */
-            flex-direction: column; /* Устанавливаем направление колонкой */
+            min-height: 100vh; 
+            flex-direction: column; 
           }
           .container { 
             display: flex; 
             flex-direction: column; 
             align-items: center; 
             width: 100%; 
-            max-width: 400px; /* Ограничиваем ширину контейнера */
+            max-width: 400px; 
             padding: 20px; 
             box-sizing: border-box; 
           }
@@ -433,7 +433,7 @@ app.get('/', async (req, res) => {
             text-align: center; 
           }
           form { 
-            width: 100%; /* Форма занимает всю ширину контейнера */
+            width: 100%; 
             max-width: 300px; 
           }
           label { 
@@ -447,7 +447,7 @@ app.get('/', async (req, res) => {
             box-sizing: border-box; 
           }
           #password { 
-            background-color: #d3d3d3; /* Серый фон */
+            background-color: #d3d3d3; 
           }
           button { 
             font-size: 16px; 
@@ -495,6 +495,19 @@ app.get('/', async (req, res) => {
           </form>
           <p id="error" class="error"></p>
         </div>
+        <script>
+          function togglePassword() {
+            const passwordInput = document.getElementById('password');
+            const eyeIcon = document.querySelector('.eye-icon');
+            if (passwordInput.type === 'password') {
+              passwordInput.type = 'text';
+              eyeIcon.textContent = '🙈';
+            } else {
+              passwordInput.type = 'password';
+              eyeIcon.textContent = '👁️';
+            }
+          }
+        </script>
       </body>
     </html>
   `);
