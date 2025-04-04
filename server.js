@@ -38,13 +38,10 @@ app.use((req, res, next) => {
 });
 
 // Настройка Redis с ioredis
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
+const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
   connectTimeout: 10000, // 10 секунд
   retryStrategy(times) {
-    return Math.min(times * 50, 2000);
+    return Math.min(times * 50, 2000); // Повторные попытки с увеличением задержки
   },
 });
 
@@ -55,6 +52,29 @@ redis.on('reconnecting', () => {
   logger.warn('Redis reconnecting...');
 });
 
+let redisAvailable = false;
+
+redis.on('connect', () => {
+  redisAvailable = true;
+  logger.info('Redis connected');
+});
+
+redis.on('error', (err) => {
+  redisAvailable = false;
+  logger.error('Redis Client Error:', err);
+});
+
+// Пример использования
+app.post('/login', async (req, res) => {
+  if (redisAvailable) {
+    // Используем Redis
+    await redis.set('key', 'value');
+  } else {
+    // Fallback: храним в памяти или пропускаем
+    logger.warn('Redis unavailable, skipping cache');
+  }
+  // Продолжаем логику входа
+});
 
 const ensureRedisConnected = async () => {
   if (!redisClient.status || redisClient.status === 'close') {
