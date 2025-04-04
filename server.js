@@ -5,6 +5,7 @@ const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 const Redis = require('ioredis'); // Используем ioredis вместо redis
+const logger = require('./logger');
 const AWS = require('aws-sdk');
 const { put, get } = require('@vercel/blob');
 const bcrypt = require('bcryptjs');
@@ -38,6 +39,7 @@ app.use((req, res, next) => {
 });
 
 // Настройка Redis с ioredis
+// Используем REDIS_URL из переменных окружения
 const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
   connectTimeout: 10000, // 10 секунд
   retryStrategy(times) {
@@ -45,24 +47,19 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
   },
 });
 
+redis.on('error', (err) => {
+  logger.error('Redis Client Error:', err);
+});
+
 redis.on('connect', () => {
   logger.info('Redis connected successfully');
 });
+
 redis.on('reconnecting', () => {
   logger.warn('Redis reconnecting...');
 });
 
-let redisAvailable = false;
-
-redis.on('connect', () => {
-  redisAvailable = true;
-  logger.info('Redis connected');
-});
-
-redis.on('error', (err) => {
-  redisAvailable = false;
-  logger.error('Redis Client Error:', err);
-});
+module.exports = redis;
 
 // Пример использования
 app.post('/login', async (req, res) => {
