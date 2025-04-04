@@ -5,6 +5,7 @@ const ExcelJS = require('exceljs');
 const { createClient } = require('redis');
 const fs = require('fs');
 const multer = require('multer');
+const AWS = require('aws-sdk');
 
 const app = express();
 
@@ -22,7 +23,8 @@ const loadUsers = async () => {
     console.log('Attempting to load users from:', filePath);
 
     if (!fs.existsSync(filePath)) {
-      throw new Error(`File users.xlsx not found at path: ${filePath}`);
+      console.warn(`File users.xlsx not found at path: ${filePath}. Using default users.`);
+      return { admin: 'admin123' }; // Заглушка: пользователь admin с паролем admin123
     }
     console.log('File users.xlsx exists at:', filePath);
 
@@ -62,14 +64,61 @@ const loadUsers = async () => {
   }
 };
 
+/ Настройка S3
+const s3 = new AWS.S3({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION
+});
+
+app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async (req, res) => {
+  try {
+    const { name, timeLimit } = req.body;
+    const questionsFile = req.file;
+
+    if (!name || !timeLimit || !questionsFile) {
+      return res.status(400).json({ success: false, message: 'Усі поля обов’язкові' });
+    }
+
+    const newTestNum = String(Object.keys(testNames).length + 1);
+    const newFileName = `questions${newTestNum}.xlsx`;
+
+    // Загружаем файл в S3
+    const fileContent = fs.readFileSync(questionsFile.path);
+    const params = {
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: newFileName,
+      Body: fileContent,
+      ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    };
+    await s3.upload(params).promise();
+
+    // Удаляем временный файл
+    fs.unlinkSync(questionsFile.path);
+
+    testNames[newTestNum] = {
+      name,
+      timeLimit: parseInt(timeLimit),
+      questionsFile: newFileName
+    };
+
+    res.json({ success: true, message: 'Тест успішно створено' });
+  } catch (error) {
+    console.error('Ошибка в /admin/create-test:', error.stack);
+    res.status(500).json({ success: false, message: 'Помилка при створенні тесту: ' + error.message });
+  }
+});
+
+// Обновим loadQuestions для загрузки из S3
 const loadQuestions = async (questionsFile) => {
   try {
-    const filePath = path.join('/tmp', questionsFile);
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File ${questionsFile} not found at path: ${filePath}`);
-    }
+    const params = {
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: questionsFile
+    };
+    const file = await s3.getObject(params).promise();
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.load(file.Body);
     const jsonData = [];
     const sheet = workbook.getWorksheet('Questions');
 
