@@ -4,7 +4,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
-const Redis = require('ioredis');
+const Redis = require('ioredis'); // Используем ioredis вместо redis
 const AWS = require('aws-sdk');
 
 // Инициализация приложения
@@ -64,9 +64,15 @@ const setCameraMode = async (mode) => {
 // Функция загрузки пользователей из Redis
 const initializeUsersInRedis = async () => {
   const usersKey = 'users';
+  const keyType = await redisClient.type(usersKey);
+  if (keyType !== 'string' && keyType !== 'none') {
+    console.warn(`Key ${usersKey} has wrong type (${keyType}). Deleting and reinitializing.`);
+    await redisClient.del(usersKey);
+  }
+
   const existingUsers = await redisClient.get(usersKey);
   if (!existingUsers) {
-    const defaultUsers = { admin: 'admin123' }; // Заглушка
+    const defaultUsers = { admin: 'admin123' };
     await redisClient.set(usersKey, JSON.stringify(defaultUsers));
     return defaultUsers;
   }
