@@ -173,10 +173,14 @@ const loadUsers = async () => {
 
   try {
     if (redisReady) {
-      const cachedUsers = await redis.get(cacheKey);
-      if (cachedUsers) {
-        logger.info(`Loaded users from Redis cache, took ${Date.now() - startTime}ms`);
-        return JSON.parse(cachedUsers);
+      try {
+        const cachedUsers = await redis.get(cacheKey);
+        if (cachedUsers) {
+          logger.info(`Loaded users from Redis cache, took ${Date.now() - startTime}ms`);
+          return JSON.parse(cachedUsers);
+        }
+      } catch (redisError) {
+        logger.error('Error fetching users from Redis cache:', redisError.message, redisError.stack);
       }
     }
 
@@ -214,8 +218,12 @@ const loadUsers = async () => {
     }
 
     if (redisReady) {
-      await redis.set(cacheKey, JSON.stringify(users), 'EX', 3600);
-      logger.info(`Cached users in Redis`);
+      try {
+        await redis.set(cacheKey, JSON.stringify(users), 'EX', 3600);
+        logger.info(`Cached users in Redis`);
+      } catch (redisError) {
+        logger.error('Error caching users in Redis:', redisError.message, redisError.stack);
+      }
     }
 
     logger.info(`Loaded ${users.length} users from Vercel Blob Storage, took ${Date.now() - startTime}ms`);
@@ -234,14 +242,17 @@ const loadQuestions = async (questionsFile) => {
 
   try {
     if (redisReady) {
-      const cachedQuestions = await redis.get(cacheKey);
-      if (cachedQuestions) {
-        logger.info(`Loaded ${questionsFile} from Redis cache, took ${Date.now() - startTime}ms`);
-        return JSON.parse(cachedQuestions);
+      try {
+        const cachedQuestions = await redis.get(cacheKey);
+        if (cachedQuestions) {
+          logger.info(`Loaded ${questionsFile} from Redis cache, took ${Date.now() - startTime}ms`);
+          return JSON.parse(cachedQuestions);
+        }
+      } catch (redisError) {
+        logger.error(`Error fetching questions from Redis cache for ${questionsFile}:`, redisError.message, redisError.stack);
       }
     }
 
-    // Загружаем файл из Vercel Blob Storage
     const blobUrl = `${BLOB_BASE_URL}/${questionsFile}`;
     logger.info(`Fetching questions from URL: ${blobUrl}`);
     const response = await get(blobUrl);
@@ -295,8 +306,12 @@ const loadQuestions = async (questionsFile) => {
     }
 
     if (redisReady) {
-      await redis.set(cacheKey, JSON.stringify(questions), 'EX', 3600);
-      logger.info(`Cached ${questionsFile} in Redis`);
+      try {
+        await redis.set(cacheKey, JSON.stringify(questions), 'EX', 3600);
+        logger.info(`Cached ${questionsFile} in Redis`);
+      } catch (redisError) {
+        logger.error(`Error caching questions in Redis for ${questionsFile}:`, redisError.message, redisError.stack);
+      }
     }
 
     logger.info(`Loaded ${questions.length} questions from ${questionsFile}, took ${Date.now() - startTime}ms`);
