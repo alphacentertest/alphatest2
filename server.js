@@ -209,6 +209,43 @@ const loadUsers = async () => {
 };
 
 // Загрузка вопросов для теста с кэшированием
+Спасибо за уточнение! Поскольку файлы questions1.xlsx и questions2.xlsx хранятся локально в папке проекта на жестком диске, а не в Vercel Blob Storage, это объясняет ошибки, которые вы видите в логах. Ваш код в функции loadQuestions пытается загрузить эти файлы из Vercel Blob Storage, но их там нет, что приводит к сбою. Давайте исправим код, чтобы он загружал файлы непосредственно с локального диска, а не из Vercel Blob Storage.
+
+Проблема
+В текущей реализации функция loadQuestions пытается получить файлы через HTTP-запрос к Vercel Blob Storage:
+
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+const questionsFileUrl = `${BLOB_BASE_URL}/${questionsFile}`;
+const response = await get(questionsFileUrl);
+if (!response.ok) {
+  throw new Error(`Не удалось загрузить файл ${questionsFileUrl}: ${response.statusText}`);
+}
+const buffer = Buffer.from(await response.arrayBuffer());
+Но поскольку файлы находятся локально в папке проекта, а не в Vercel Blob Storage, запросы к BLOB_BASE_URL (например, https://qqeygegbb01p35fz.public.blob.vercel-storage.com/questions1.xlsx) ожидаемо завершаются ошибкой.
+
+Решение
+Нам нужно изменить функцию loadQuestions, чтобы она читала файлы questions1.xlsx и questions2.xlsx непосредственно с локального диска, используя модуль fs (File System), который уже импортирован в вашем коде. Для этого мы будем использовать fs.readFileSync или fs.promises.readFile для асинхронного чтения файлов.
+
+1. Убедитесь, что файлы находятся в правильной директории
+Предположим, что файлы questions1.xlsx и questions2.xlsx находятся в корневой папке проекта (рядом с server.js). Если они находятся в другой папке, например, в подпапке data, вам нужно будет указать правильный путь, например, data/questions1.xlsx.
+
+2. Измените функцию loadQuestions
+Обновим функцию loadQuestions, чтобы она читала файлы с диска вместо обращения к Vercel Blob Storage. Вот исправленный код:
+
+javascript
+
+Свернуть
+
+Перенос
+
+Копировать
+// Загрузка вопросов для теста с кэшированием
 const loadQuestions = async (questionsFile) => {
   const startTime = Date.now();
   const cacheKey = `questions:${questionsFile}`;
@@ -223,20 +260,26 @@ const loadQuestions = async (questionsFile) => {
       }
     }
 
-    const questionsFileUrl = `${BLOB_BASE_URL}/${questionsFile}`;
-    logger.info(`Fetching questions from ${questionsFileUrl}`);
-    const response = await get(questionsFileUrl);
-    if (!response.ok) {
-      throw new Error(`Не удалось загрузить файл ${questionsFileUrl}: ${response.statusText}`);
+    // Читаем файл с локального диска
+    const filePath = path.join(__dirname, questionsFile); // Формируем полный путь к файлу
+    logger.info(`Reading questions file from disk: ${filePath}`);
+
+    // Проверяем, существует ли файл
+    if (!fs.existsSync(filePath)) {
+      logger.error(`File ${filePath} does not exist`);
+      return []; // Возвращаем пустой массив, если файл не найден
     }
-    const buffer = Buffer.from(await response.arrayBuffer());
+
+    // Читаем файл асинхронно
+    const buffer = await fs.promises.readFile(filePath);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
 
     let sheet = workbook.getWorksheet('Questions') || workbook.getWorksheet('Sheet1');
     if (!sheet) {
-      throw new Error('Лист "Questions" або "Sheet1" не знайдено');
+      logger.warn('Worksheet "Questions" or "Sheet1" not found');
+      return [];
     }
 
     const questions = [];
@@ -270,7 +313,8 @@ const loadQuestions = async (questionsFile) => {
     });
 
     if (questions.length === 0) {
-      throw new Error('Питання не знайдено');
+      logger.warn('No questions found in the file');
+      return [];
     }
 
     if (redisReady) {
@@ -282,7 +326,7 @@ const loadQuestions = async (questionsFile) => {
     return questions;
   } catch (error) {
     logger.error(`Error loading questions from ${questionsFile}, took ${Date.now() - startTime}ms:`, error.message, error.stack);
-    throw error;
+    return [];
   }
 };
 
