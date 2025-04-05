@@ -2,10 +2,10 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
-const path = require('path');
+const path = require('path'); // Объявляем path только здесь
 const fs = require('fs');
 const Redis = require('ioredis');
-const logger = require('./logger'); // Импортируем логгер из отдельного файла
+const logger = require('./logger');
 const AWS = require('aws-sdk');
 const { put, get } = require('@vercel/blob');
 const bcrypt = require('bcryptjs');
@@ -18,38 +18,57 @@ require('dotenv').config();
 const app = express();
 
 // Настройка Redis
-let redisAvailable = false;
+let redisReady = false; // Глобальная переменная для отслеживания готовности Redis
 const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
-  connectTimeout: 10000,
+  connectTimeout: 20000,
+  maxRetriesPerRequest: 5,
   retryStrategy(times) {
-    return Math.min(times * 50, 2000);
+    const delay = Math.min(times * 500, 5000);
+    logger.info(`Retrying Redis connection, attempt ${times}, delay ${delay}ms`);
+    return delay;
   },
-});
-
-redis.on('error', (err) => {
-  redisAvailable = false;
-  logger.error('Redis Client Error:', err);
+  enableOfflineQueue: true,
+  enableReadyCheck: true,
 });
 
 redis.on('connect', () => {
-  redisAvailable = true;
   logger.info('Redis connected successfully');
 });
 
+redis.on('ready', () => {
+  redisReady = true;
+  logger.info('Redis is ready to accept commands');
+});
+
+redis.on('error', (err) => {
+  redisReady = false;
+  logger.error('Redis Client Error:', {
+    message: err.message,
+    stack: err.stack,
+    status: redis.status,
+  });
+});
+
 redis.on('reconnecting', () => {
+  redisReady = false;
   logger.warn('Redis reconnecting...');
+});
+
+redis.on('end', () => {
+  redisReady = false;
+  logger.warn('Redis connection closed');
 });
 
 // Функция проверки подключения к Redis
 const ensureRedisConnected = async () => {
-  if (redis.status === 'close') {
+  if (redis.status === 'close' || redis.status === 'end') {
     logger.info('Redis client is closed, attempting to reconnect...');
     try {
       await redis.connect();
-      redisAvailable = true;
+      redisReady = true;
       logger.info('Redis reconnected successfully');
     } catch (err) {
-      redisAvailable = false;
+      redisReady = false;
       logger.error('Failed to reconnect to Redis:', err.message, err.stack);
       throw err;
     }
@@ -152,7 +171,7 @@ const loadUsers = async () => {
     logger.info('Worksheet found:', sheet.name);
 
     const users = {};
-    if (redisAvailable) {
+    if (redisReady) {
       await redis.del('users'); // Очищаем старые данные
     }
 
@@ -172,10 +191,10 @@ const loadUsers = async () => {
     const saltRounds = 10;
     for (const { username, password } of userRows) {
       const hashedPassword = await bcrypt.hash(password, saltRounds);
-      if (redisAvailable) {
+      if (redisReady) {
         await redis.hset('users', username, hashedPassword);
       }
-      users[username] = password; // Для локального использования
+      users[username] = hashedPassword; // Храним хэшированный пароль
     }
 
     if (Object.keys(users).length === 0) {
@@ -196,8 +215,7 @@ const loadQuestions = async (questionsFile) => {
   logger.info(`Loading questions for ${questionsFile}`);
 
   try {
-    // Проверяем кэш в Redis
-    if (redisAvailable) {
+    if (redisReady) {
       const cachedQuestions = await redis.get(cacheKey);
       if (cachedQuestions) {
         logger.info(`Loaded ${questionsFile} from Redis cache, took ${Date.now() - startTime}ms`);
@@ -255,8 +273,7 @@ const loadQuestions = async (questionsFile) => {
       throw new Error('Питання не знайдено');
     }
 
-    // Сохраняем в кэш на 1 час
-    if (redisAvailable) {
+    if (redisReady) {
       await redis.set(cacheKey, JSON.stringify(questions), 'EX', 3600);
       logger.info(`Cached ${questionsFile} in Redis`);
     }
@@ -271,43 +288,43 @@ const loadQuestions = async (questionsFile) => {
 
 // Получение и установка режима камеры
 const getCameraMode = async () => {
-  if (redisAvailable) {
+  if (redisReady) {
     const mode = await redis.get('cameraMode');
     return mode === 'true';
   }
-  return false; // Fallback
+  return false;
 };
 
 const setCameraMode = async (mode) => {
-  if (redisAvailable) {
+  if (redisReady) {
     await redis.set('cameraMode', String(mode));
   }
 };
 
 // Получение и установка данных теста пользователя
 const getUserTest = async (user) => {
-  if (redisAvailable) {
+  if (redisReady) {
     const testData = await redis.hget('userTests', user);
     return testData ? JSON.parse(testData) : null;
   }
-  return null; // Fallback
+  return null;
 };
 
 const setUserTest = async (user, testData) => {
-  if (redisAvailable) {
+  if (redisReady) {
     await redis.hset('userTests', user, JSON.stringify(testData));
   }
 };
 
 const deleteUserTest = async (user) => {
-  if (redisAvailable) {
+  if (redisReady) {
     await redis.hdel('userTests', user);
   }
 };
 
 // Сохранение результата теста
 const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousBehavior, answers, questions) => {
-  if (!redisAvailable) {
+  if (!redisReady) {
     logger.warn('Redis unavailable, skipping result save');
     return;
   }
@@ -377,8 +394,12 @@ const initializeServer = async () => {
       logger.info(`Starting server initialization (Attempt ${attempt} of ${maxAttempts})`);
       await ensureRedisConnected();
 
+      if (!redisReady) {
+        throw new Error('Redis is not ready after connection attempt');
+      }
+
       // Загрузка testNames из Redis
-      if (redisAvailable) {
+      if (redisReady) {
         const testNamesData = await redis.get('testNames');
         testNames = testNamesData ? JSON.parse(testNamesData) : {
           '1': { name: 'Тест 1', timeLimit: 3600, questionsFile: 'questions1.xlsx' },
@@ -407,10 +428,16 @@ const initializeServer = async () => {
 // Middleware для проверки инициализации
 const checkInitialization = (req, res, next) => {
   if (!isInitialized) {
+    logger.warn('Server not initialized yet');
     return res.status(503).send('Сервер ще ініціалізується. Спробуйте пізніше.');
   }
   if (initializationError) {
+    logger.error('Server initialization failed:', initializationError.message);
     return res.status(500).send('Помилка ініціалізації сервера: ' + initializationError.message);
+  }
+  if (!redisReady) {
+    logger.warn('Redis not ready');
+    return res.status(503).send('Сервер ще ініціалізується. Спробуйте пізніше.');
   }
   next();
 };
@@ -418,8 +445,13 @@ const checkInitialization = (req, res, next) => {
 // Применяем middleware ко всем маршрутам
 app.use(checkInitialization);
 
+// Обработка favicon.ico и favicon.png
 app.get('/favicon.ico', (req, res) => {
-  res.status(204).end(); // 204 No Content
+  res.status(204).end();
+});
+
+app.get('/favicon.png', (req, res) => {
+  res.status(204).end();
 });
 
 // Главная страница (вход)
@@ -577,6 +609,12 @@ app.post(
     logger.info('Handling POST /login');
 
     try {
+      // Проверяем готовность Redis
+      if (!redisReady) {
+        logger.warn('Redis not ready during login attempt');
+        return res.status(503).json({ success: false, message: 'Сервер ще ініціалізується. Спробуйте пізніше.' });
+      }
+
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         logger.warn('Validation errors:', errors.array());
@@ -587,7 +625,7 @@ app.post(
       logger.info(`Checking password for user input`);
 
       let users = validPasswords;
-      if (redisAvailable) {
+      if (redisReady) {
         const redisUsers = await redis.hgetall('users');
         users = { ...users, ...redisUsers };
       }
@@ -1202,7 +1240,7 @@ app.get('/admin', checkAdmin, async (req, res) => {
 
   try {
     let results = [];
-    if (redisAvailable) {
+    if (redisReady) {
       results = await redis.lrange('test_results', 0, -1);
     }
     const parsedResults = results.map(r => JSON.parse(r));
@@ -1348,7 +1386,7 @@ app.post('/admin/delete-results', checkAdmin, async (req, res) => {
   logger.info('Handling POST /admin/delete-results');
 
   try {
-    if (redisAvailable) {
+    if (redisReady) {
       await redis.del('test_results');
     }
     logger.info(`Test results deleted, took ${Date.now() - startTime}ms`);
@@ -1438,7 +1476,7 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
     }
 
     testNames[newTestNumber] = { name: testName, timeLimit: parseInt(timeLimit), questionsFile: questionsFileName };
-    if (redisAvailable) {
+    if (redisReady) {
       await redis.set('testNames', JSON.stringify(testNames));
     }
     fs.unlinkSync(file.path);
@@ -1544,7 +1582,7 @@ app.post('/admin/update-test', checkAdmin, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Тест не знайдено' });
     }
     testNames[testNum] = { name, timeLimit: parseInt(timeLimit), questionsFile };
-    if (redisAvailable) {
+    if (redisReady) {
       await redis.set('testNames', JSON.stringify(testNames));
     }
     logger.info(`Test ${testNum} updated, took ${Date.now() - startTime}ms`);
@@ -1566,7 +1604,7 @@ app.post('/admin/delete-test', checkAdmin, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Тест не знайдено' });
     }
     delete testNames[testNum];
-    if (redisAvailable) {
+    if (redisReady) {
       await redis.set('testNames', JSON.stringify(testNames));
     }
     logger.info(`Test ${testNum} deleted, took ${Date.now() - startTime}ms`);
@@ -1584,7 +1622,7 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
 
   try {
     let results = [];
-    if (redisAvailable) {
+    if (redisReady) {
       results = await redis.lrange('test_results', 0, -1);
     }
     const parsedResults = results.map(r => JSON.parse(r));
@@ -1747,69 +1785,70 @@ app.use((err, req, res, next) => {
       </head>
       <body>
         <h1>500 - Помилка сервера</h1>
+        <p>Виникла помилка на сервері. Будь ласка, спробуйте пізніше.</p>
         <button onclick="window.location.href='/'">Повернутися на головну</button>
       </body>
     </html>
   `);
 });
 
-// Обработка завершения процесса
-process.on('SIGTERM', async () => {
-  logger.info('Received SIGTERM, shutting down gracefully...');
-  try {
-    await redis.quit();
-    logger.info('Redis connection closed');
-  } catch (err) {
-    logger.error('Error closing Redis connection:', err.stack);
-  }
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  logger.info('Received SIGINT, shutting down gracefully...');
-  try {
-    await redis.quit();
-    logger.info('Redis connection closed');
-  } catch (err) {
-    logger.error('Error closing Redis connection:', err.stack);
-  }
-  process.exit(0);
-});
-
-process.on('uncaughtException', (err) => {
-  logger.error('Uncaught Exception:', err.stack);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason.stack || reason);
-  process.exit(1);
-  });
-  
-  // Запуск сервера
+// Запуск сервера
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
-  logger.info(`Server is running on ${PORT}`); // Используем шаблонную строку
+
+const startServer = async () => {
+  const startTime = Date.now();
+  logger.info('Starting server...');
+
   try {
+    // Инициализация сервера перед запуском
     await initializeServer();
+
     if (!isInitialized) {
-      logger.error('Server failed to initialize after startup');
+      logger.error('Server failed to initialize, cannot start');
       process.exit(1);
     }
-  } catch (err) {
-    logger.error('Error during server startup:', err.stack);
+
+    app.listen(PORT, () => {
+      logger.info(`Server is running on port ${PORT}, initialization took ${Date.now() - startTime}ms`);
+    });
+  } catch (error) {
+    logger.error(`Failed to start server, took ${Date.now() - startTime}ms:`, error.stack);
     process.exit(1);
   }
-});
-  
-  // Периодическая проверка подключения к Redis
-  setInterval(async () => {
+};
+
+// Обработка graceful shutdown
+const shutdown = async () => {
+  logger.info('Received shutdown signal, closing server...');
   try {
-  await ensureRedisConnected();
-  } catch (err) {
-  logger.error('Periodic Redis check failed:', err.message);
+    // Закрываем соединение с Redis
+    if (redis) {
+      await redis.quit();
+      logger.info('Redis connection closed');
+    }
+  } catch (error) {
+    logger.error('Error during Redis shutdown:', error.stack);
+  } finally {
+    logger.info('Server shutdown complete');
+    process.exit(0);
   }
-  }, 30000); // Проверка каждые 30 секунд
-  
-  // Экспорт приложения для тестирования (если требуется)
-  module.exports = app;
+};
+
+// Обработка сигналов завершения
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+// Обработка необработанных исключений
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error.stack);
+  shutdown();
+});
+
+// Обработка необработанных отклонений промисов
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  shutdown();
+});
+
+// Запускаем сервер
+startServer();
