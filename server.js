@@ -137,8 +137,8 @@ let validPasswords = {};
 let isInitialized = false;
 let initializationError = null;
 let testNames = {
-  '1': { name: 'Тест 1', timeLimit: 3600, questionsFile: 'questions1.xlsx' },
-  '2': { name: 'Тест 2', timeLimit: 3600, questionsFile: 'questions2.xlsx' },
+  '1': { name: 'Тест 1', timeLimit: 3600, questionsFile: 'questions1-YRlwgYJYLbeJVmSB50wAAamSC4XSAQ.xlsx' },
+  '2': { name: 'Тест 2', timeLimit: 3600, questionsFile: 'questions2-tYabjUzo1e9pPdBOJlaV3pNgVLD0HK.xlsx' },
 };
 
 // Middleware для проверки инициализации
@@ -168,9 +168,18 @@ const formatDuration = (seconds) => {
 // Загрузка пользователей из Vercel Blob Storage
 const loadUsers = async () => {
   const startTime = Date.now();
+  const cacheKey = 'users';
   logger.info('Attempting to load users from Vercel Blob Storage...');
 
   try {
+    if (redisReady) {
+      const cachedUsers = await redis.get(cacheKey);
+      if (cachedUsers) {
+        logger.info(`Loaded users from Redis cache, took ${Date.now() - startTime}ms`);
+        return JSON.parse(cachedUsers);
+      }
+    }
+
     const blobUrl = `${BLOB_BASE_URL}/users-C2sivyAPoIF7lPXTbhfNjFMVyLNN5h.xlsx`;
     logger.info(`Fetching users from URL: ${blobUrl}`);
     const response = await get(blobUrl);
@@ -180,51 +189,40 @@ const loadUsers = async () => {
     const buffer = Buffer.from(await response.arrayBuffer());
 
     const workbook = new ExcelJS.Workbook();
-    logger.info('Reading users.xlsx from Blob Storage...');
     await workbook.xlsx.load(buffer);
-    logger.info('File read successfully');
 
     let sheet = workbook.getWorksheet('Users') || workbook.getWorksheet('Sheet1');
     if (!sheet) {
-      throw new Error('Ни один из листов ("Users" или "Sheet1") не найден');
-    }
-    logger.info('Worksheet found:', sheet.name);
-
-    const users = {};
-    if (redisReady) {
-      await redis.del('users'); // Очищаем старые данные
+      logger.warn('Worksheet "Users" or "Sheet1" not found');
+      return [];
     }
 
-    const userRows = [];
+    const users = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber > 1) {
         const username = String(row.getCell(1).value || '').trim();
         const password = String(row.getCell(2).value || '').trim();
         if (username && password) {
-          userRows.push({ username, password });
+          users.push({ username, password });
         }
       }
     });
 
-    logger.info('Users loaded from Excel:', userRows);
-
-    const saltRounds = 10;
-    for (const { username, password } of userRows) {
-      const hashedPassword = await bcrypt.hash(password, saltRounds);
-      if (redisReady) {
-        await redis.hset('users', username, hashedPassword);
-      }
-      users[username] = hashedPassword; // Храним хэшированный пароль
+    if (users.length === 0) {
+      logger.warn('No users found in the file');
+      return [];
     }
 
-    if (Object.keys(users).length === 0) {
-      throw new Error('Не знайдено користувачів у файлі');
+    if (redisReady) {
+      await redis.set(cacheKey, JSON.stringify(users), 'EX', 3600);
+      logger.info(`Cached users in Redis`);
     }
-    logger.info(`Loaded users and stored in Redis, took ${Date.now() - startTime}ms`);
+
+    logger.info(`Loaded ${users.length} users from Vercel Blob Storage, took ${Date.now() - startTime}ms`);
     return users;
   } catch (error) {
     logger.error(`Error loading users from Blob Storage, took ${Date.now() - startTime}ms:`, error.message, error.stack);
-    throw error;
+    return [];
   }
 };
 
@@ -433,9 +431,14 @@ const initializeServer = async () => {
 
     const questionPromises = Object.keys(testNames).map(async (key) => {
       const test = testNames[key];
-      test.questions = await loadQuestions(test.questionsFile);
-      if (test.questions.length === 0) {
-        logger.warn(`No questions loaded for test ${key}, removing from testNames`);
+      try {
+        test.questions = await loadQuestions(test.questionsFile);
+        if (test.questions.length === 0) {
+          logger.warn(`No questions loaded for test ${key}, removing from testNames`);
+          delete testNames[key];
+        }
+      } catch (error) {
+        logger.error(`Failed to load questions for test ${key}:`, error.message, error.stack);
         delete testNames[key];
       }
     });
@@ -443,7 +446,8 @@ const initializeServer = async () => {
     await Promise.all(questionPromises);
 
     if (Object.keys(testNames).length === 0) {
-      throw new Error('No tests available after initialization');
+      logger.warn('No tests available after initialization. Server will start, but no tests will be available.');
+      // Вместо throw new Error позволим серверу запуститься
     }
 
     isInitialized = true;
