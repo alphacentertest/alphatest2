@@ -7,13 +7,30 @@ const fs = require('fs');
 const Redis = require('ioredis');
 const logger = require('./logger');
 const AWS = require('aws-sdk');
-const { put, get } = require('@vercel/blob');
+const { put, get, list } = require('@vercel/blob');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const fetch = require('node-fetch');
 require('dotenv').config();
+
+// Проверка обязательных переменных окружения
+const requiredEnvVars = [
+  'REDIS_URL',
+  'BLOB_READ_WRITE_TOKEN',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_REGION',
+  'S3_BUCKET_NAME',
+];
+
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    logger.error(`Missing required environment variable: ${envVar}`);
+    process.exit(1);
+  }
+}
 
 // Инициализация приложения
 const app = express();
@@ -30,10 +47,19 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
   retryStrategy(times) {
     const delay = Math.min(times * 500, 5000);
     logger.info(`Retrying Redis connection, attempt ${times}, delay ${delay}ms`);
+    if (times > 10) {
+      logger.error('Failed to connect to Redis after 10 attempts.', {
+        redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+        status: redis.status,
+      });
+      logger.error('Exiting...');
+      process.exit(1);
+    }
     return delay;
   },
   enableOfflineQueue: true,
   enableReadyCheck: true,
+  tls: process.env.REDIS_URL && (process.env.REDIS_URL.includes('upstash.io') || process.env.REDIS_URL.includes('redis-cloud.com')) ? {} : undefined,
 });
 
 redis.on('connect', () => {
@@ -51,6 +77,7 @@ redis.on('error', (err) => {
     message: err.message,
     stack: err.stack,
     status: redis.status,
+    redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   });
 });
 
@@ -63,22 +90,6 @@ redis.on('end', () => {
   redisReady = false;
   logger.warn('Redis connection closed');
 });
-
-// Функция проверки подключения к Redis
-const ensureRedisConnected = async () => {
-  if (redis.status === 'close' || redis.status === 'end') {
-    logger.info('Redis client is closed, attempting to reconnect...');
-    try {
-      await redis.connect();
-      redisReady = true;
-      logger.info('Redis reconnected successfully');
-    } catch (err) {
-      redisReady = false;
-      logger.error('Failed to reconnect to Redis:', err.message, err.stack);
-      throw err;
-    }
-  }
-};
 
 // Настройка AWS S3
 const s3 = new AWS.S3({
@@ -166,51 +177,56 @@ const formatDuration = (seconds) => {
 
 // Функция для получения списка файлов из Vercel Blob Storage
 const listBlobs = async () => {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
-    throw new Error('BLOB_READ_WRITE_TOKEN is not set');
+  try {
+    logger.info('Attempting to list blobs from Vercel Blob Storage');
+    const result = await list({
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
+    logger.info(`Successfully listed ${result.blobs.length} blobs from Vercel Blob Storage`);
+    return result.blobs || [];
+  } catch (error) {
+    logger.error('Failed to list blobs from Vercel Blob Storage:', {
+      message: error.message,
+      stack: error.stack,
+      token: process.env.BLOB_READ_WRITE_TOKEN ? 'Token present' : 'Token missing',
+    });
+    throw error;
   }
-
-  const response = await fetch('https://blob.vercel-storage.com', {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to list blobs: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  return data.blobs || [];
 };
 
 // Загрузка testNames динамически
 const loadTestNames = async () => {
-  const blobs = await listBlobs();
-  const questionFiles = blobs.filter(blob => blob.pathname.startsWith('questions') && blob.pathname.endsWith('.xlsx'));
+  const startTime = Date.now();
+  logger.info('Loading test names dynamically');
 
-  testNames = {};
-  questionFiles.forEach((blob, index) => {
-    const testNumber = String(index + 1);
-    testNames[testNumber] = {
-      name: `Тест ${testNumber}`,
-      timeLimit: 3600,
-      questionsFile: blob.pathname,
-    };
-  });
+  try {
+    const blobs = await listBlobs();
+    const questionFiles = blobs.filter(blob => blob.pathname.startsWith('questions') && blob.pathname.endsWith('.xlsx'));
 
-  if (redisReady) {
-    try {
-      await redis.set('testNames', JSON.stringify(testNames));
-    } catch (redisError) {
-      logger.error(`Error caching testNames in Redis: ${redisError.message}`, { stack: redisError.stack });
+    testNames = {};
+    questionFiles.forEach((blob, index) => {
+      const testNumber = String(index + 1);
+      testNames[testNumber] = {
+        name: `Тест ${testNumber}`,
+        timeLimit: 3600,
+        questionsFile: blob.pathname,
+      };
+    });
+
+    if (redisReady) {
+      try {
+        await redis.set('testNames', JSON.stringify(testNames));
+        logger.info('Cached testNames in Redis');
+      } catch (redisError) {
+        logger.error(`Error caching testNames in Redis: ${redisError.message}`, { stack: redisError.stack });
+      }
     }
-  }
 
-  logger.info(`Loaded ${Object.keys(testNames).length} tests dynamically`);
+    logger.info(`Loaded ${Object.keys(testNames).length} tests dynamically, took ${Date.now() - startTime}ms`);
+  } catch (error) {
+    logger.error(`Failed to load test names, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+    throw error;
+  }
 };
 
 // Загрузка пользователей из Vercel Blob Storage
@@ -285,7 +301,7 @@ const loadUsers = async () => {
     return users;
   } catch (error) {
     logger.error(`Error loading users from Blob Storage, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    return [];
+    throw error;
   }
 };
 
@@ -373,7 +389,7 @@ const loadQuestions = async (questionsFile) => {
     return questions;
   } catch (error) {
     logger.error(`Error loading questions from ${questionsFile}, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    return [];
+    throw error;
   }
 };
 
@@ -480,6 +496,7 @@ const checkAdmin = (req, res, next) => {
 const initializeServer = async () => {
   const startTime = Date.now();
   try {
+    logger.info('Starting server initialization...');
     await new Promise((resolve) => {
       redis.once('ready', () => {
         redisReady = true;
@@ -487,20 +504,13 @@ const initializeServer = async () => {
         resolve();
       });
     });
+    logger.info('Redis connection established');
 
     const usersFromBlob = await loadUsers();
-    if (usersFromBlob.length === 0) {
-      logger.warn('No users loaded from Blob Storage. Admin functionality may be limited.');
-    } else {
-      users = usersFromBlob;
-      for (const user of users) {
-        const hashedPassword = await bcrypt.hash(user.password, 10);
-        user.password = hashedPassword;
-        validPasswords[user.username] = hashedPassword;
-      }
-    }
+    logger.info(`Loaded ${usersFromBlob.length} users from Blob Storage`);
 
     await loadTestNames();
+    logger.info('Test names loaded');
 
     const questionPromises = Object.keys(testNames).map(async (key) => {
       const test = testNames[key];
@@ -517,12 +527,14 @@ const initializeServer = async () => {
     });
 
     await Promise.all(questionPromises);
+    logger.info('All questions loaded');
 
     if (Object.keys(testNames).length === 0) {
       logger.warn('No tests available after initialization. Server will start, but no tests will be available.');
     }
 
     isInitialized = true;
+    logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
   } catch (error) {
     logger.error(`Failed to initialize server, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
     throw error;
@@ -1528,7 +1540,7 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
 
     let blob;
     try {
-      blob = await put(questionsFileName, fs.readFileSync(file.path), { access: 'public' });
+      blob = await put(questionsFileName, fs.readFileSync(file.path), { access: 'public', token: process.env.BLOB_READ_WRITE_TOKEN });
     } catch (blobError) {
       logger.error('Ошибка при загрузке в Vercel Blob:', blobError);
       throw new Error('Не удалось загрузить файл в хранилище');
@@ -1840,13 +1852,13 @@ app.use((err, req, res, next) => {
         <style>
           body { font-size: 16px; margin: 20px; text-align: center; }
           h1 { font-size: 24px; margin-bottom: 20px; }
-          button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+          button { font-size           16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
           button:hover { background-color: #0056b3; }
         </style>
       </head>
       <body>
         <h1>500 - Помилка сервера</h1>
-        <p>Щось пішло не так. Спробуйте ще раз пізніше.</p>
+        <p>Виникла помилка на сервері. Будь ласка, спробуйте ще раз пізніше.</p>
         <button onclick="window.location.href='/'">Повернутися на головну</button>
       </body>
     </html>
@@ -1854,48 +1866,95 @@ app.use((err, req, res, next) => {
   logger.info(`500 response sent, took ${Date.now() - startTime}ms`);
 });
 
-// Запуск сервера
-const PORT = process.env.PORT || 3000;
+// Функция для graceful shutdown
+const gracefulShutdown = (server) => {
+  return async () => {
+    logger.info('Received shutdown signal. Initiating graceful shutdown...');
+    try {
+      // Закрываем соединение с Redis
+      if (redis) {
+        await redis.quit();
+        logger.info('Redis connection closed');
+      }
 
+      // Закрываем сервер
+      server.close(() => {
+        logger.info('HTTP server closed');
+        process.exit(0);
+      });
+
+      // Принудительное завершение через 10 секунд, если сервер не закроется
+      setTimeout(() => {
+        logger.error('Could not close connections in time, forcefully shutting down');
+        process.exit(1);
+      }, 10000);
+    } catch (error) {
+      logger.error('Error during graceful shutdown:', {
+        message: error.message,
+        stack: error.stack,
+      });
+      process.exit(1);
+    }
+  };
+};
+
+// Запуск сервера
 const startServer = async () => {
-  const startTime = Date.now();
-  logger.info('Starting server...');
+  const port = process.env.PORT || 3000;
+  let server;
 
   try {
+    // Инициализация сервера
     await initializeServer();
-    app.listen(PORT, () => {
-      logger.info(`Server is running on port ${PORT}, initialization took ${Date.now() - startTime}ms`);
+
+    // Запуск сервера
+    server = app.listen(port, () => {
+      logger.info(`Server is running on port ${port}`);
     });
+
+    // Обработка ошибок сервера
+    server.on('error', (error) => {
+      logger.error('Server error:', {
+        message: error.message,
+        stack: error.stack,
+        port,
+      });
+      process.exit(1);
+    });
+
+    // Обработка сигналов для graceful shutdown
+    process.on('SIGTERM', gracefulShutdown(server));
+    process.on('SIGINT', gracefulShutdown(server));
+
+    // Обработка необработанных исключений
+    process.on('uncaughtException', (error) => {
+      logger.error('Uncaught Exception:', {
+        message: error.message,
+        stack: error.stack,
+      });
+      gracefulShutdown(server)();
+    });
+
+    // Обработка необработанных отклонений промисов
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('Unhandled Rejection at:', {
+        promise,
+        reason: reason instanceof Error ? reason.message : reason,
+        stack: reason instanceof Error ? reason.stack : undefined,
+      });
+      // Не завершаем процесс, так как это может быть некритично
+    });
+
   } catch (error) {
-    initializationError = error;
-    logger.error(`Failed to start server: ${error.message}`, { stack: error.stack });
+    logger.error('Failed to start server:', {
+      message: error.message,
+      stack: error.stack,
+    });
     process.exit(1);
   }
 };
 
+// Запускаем сервер
 startServer();
 
-// Обработка завершения процесса
-process.on('SIGTERM', async () => {
-  logger.info('Received SIGTERM, shutting down gracefully...');
-  try {
-    if (redisReady) {
-      await redis.quit();
-      logger.info('Redis connection closed');
-    }
-    process.exit(0);
-  } catch (err) {
-    logger.error(`Error during shutdown: ${err.message}`, { stack: err.stack });
-    process.exit(1);
-  }
-});
-
-process.on('uncaughtException', (err) => {
-  logger.error(`Uncaught Exception: ${err.message}`, { stack: err.stack });
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
+module.exports = app;

@@ -1,0 +1,224 @@
+{"level":"info","message":"Starting server...","timestamp":"2025-04-05T12:21:11.704Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:11.719Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 1, delay 500ms","timestamp":"2025-04-05T12:21:11.720Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:11.720Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:12.234Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 2, delay 1000ms","timestamp":"2025-04-05T12:21:12.234Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:12.236Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:13.240Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 3, delay 1500ms","timestamp":"2025-04-05T12:21:13.240Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:13.241Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:14.743Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 4, delay 2000ms","timestamp":"2025-04-05T12:21:14.744Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:14.746Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:16.758Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 5, delay 2500ms","timestamp":"2025-04-05T12:21:16.758Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:16.760Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:19.265Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 6, delay 3000ms","timestamp":"2025-04-05T12:21:19.265Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:19.267Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:22.269Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 7, delay 3500ms","timestamp":"2025-04-05T12:21:22.270Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:22.271Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:25.788Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 8, delay 4000ms","timestamp":"2025-04-05T12:21:25.789Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:25.791Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:29.795Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 9, delay 4500ms","timestamp":"2025-04-05T12:21:29.796Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:29.798Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:34.314Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 10, delay 5000ms","timestamp":"2025-04-05T12:21:34.315Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:34.317Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:39.326Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 11, delay 5000ms","timestamp":"2025-04-05T12:21:39.328Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:39.330Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:44.341Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 12, delay 5000ms","timestamp":"2025-04-05T12:21:44.343Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:44.345Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:49.346Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 13, delay 5000ms","timestamp":"2025-04-05T12:21:49.483Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:49.483Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:54.500Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 14, delay 5000ms","timestamp":"2025-04-05T12:21:54.501Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:54.501Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:21:59.504Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 15, delay 5000ms","timestamp":"2025-04-05T12:21:59.505Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:21:59.506Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:04.516Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 16, delay 5000ms","timestamp":"2025-04-05T12:22:04.517Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:04.518Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:09.532Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 17, delay 5000ms","timestamp":"2025-04-05T12:22:09.533Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:09.534Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:14.546Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 18, delay 5000ms","timestamp":"2025-04-05T12:22:14.547Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:14.548Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:19.551Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 19, delay 5000ms","timestamp":"2025-04-05T12:22:19.552Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:19.553Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:24.568Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 20, delay 5000ms","timestamp":"2025-04-05T12:22:24.569Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:24.570Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:29.586Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 21, delay 5000ms","timestamp":"2025-04-05T12:22:29.586Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:29.587Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:34.589Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 22, delay 5000ms","timestamp":"2025-04-05T12:22:34.589Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:34.590Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:39.596Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 23, delay 5000ms","timestamp":"2025-04-05T12:22:39.597Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:39.598Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:44.601Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 24, delay 5000ms","timestamp":"2025-04-05T12:22:44.602Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:44.603Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:49.605Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 25, delay 5000ms","timestamp":"2025-04-05T12:22:49.606Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:49.606Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:54.617Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 26, delay 5000ms","timestamp":"2025-04-05T12:22:54.617Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:54.618Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:22:59.629Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 27, delay 5000ms","timestamp":"2025-04-05T12:22:59.630Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:22:59.632Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:04.647Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 28, delay 5000ms","timestamp":"2025-04-05T12:23:04.648Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:04.650Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:09.663Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 29, delay 5000ms","timestamp":"2025-04-05T12:23:09.663Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:09.667Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:14.668Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 30, delay 5000ms","timestamp":"2025-04-05T12:23:14.669Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:14.671Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:19.673Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 31, delay 5000ms","timestamp":"2025-04-05T12:23:19.674Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:19.676Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:24.692Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 32, delay 5000ms","timestamp":"2025-04-05T12:23:24.693Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:24.695Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:29.695Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 33, delay 5000ms","timestamp":"2025-04-05T12:23:29.696Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:29.698Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:34.703Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 34, delay 5000ms","timestamp":"2025-04-05T12:23:34.703Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:34.705Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:39.709Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 35, delay 5000ms","timestamp":"2025-04-05T12:23:39.709Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:39.711Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:44.724Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 36, delay 5000ms","timestamp":"2025-04-05T12:23:44.725Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:44.727Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:49.730Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 37, delay 5000ms","timestamp":"2025-04-05T12:23:49.731Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:49.733Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:54.735Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 38, delay 5000ms","timestamp":"2025-04-05T12:23:54.736Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:54.740Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:23:59.752Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 39, delay 5000ms","timestamp":"2025-04-05T12:23:59.753Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:23:59.754Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:04.767Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 40, delay 5000ms","timestamp":"2025-04-05T12:24:04.768Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:04.771Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:09.784Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 41, delay 5000ms","timestamp":"2025-04-05T12:24:09.785Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:09.787Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:14.803Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 42, delay 5000ms","timestamp":"2025-04-05T12:24:14.804Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:14.808Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:19.812Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 43, delay 5000ms","timestamp":"2025-04-05T12:24:19.813Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:19.815Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:24.825Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 44, delay 5000ms","timestamp":"2025-04-05T12:24:24.826Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:24.828Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:29.837Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 45, delay 5000ms","timestamp":"2025-04-05T12:24:29.838Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:29.842Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:34.856Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 46, delay 5000ms","timestamp":"2025-04-05T12:24:34.856Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:34.858Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:39.869Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 47, delay 5000ms","timestamp":"2025-04-05T12:24:39.870Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:39.873Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:44.877Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 48, delay 5000ms","timestamp":"2025-04-05T12:24:44.877Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:44.881Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:49.889Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 49, delay 5000ms","timestamp":"2025-04-05T12:24:49.890Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:49.893Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:54.895Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 50, delay 5000ms","timestamp":"2025-04-05T12:24:54.896Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:54.898Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:24:59.901Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 51, delay 5000ms","timestamp":"2025-04-05T12:24:59.902Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:24:59.904Z"}
+{"level":"info","message":"Starting server...","timestamp":"2025-04-05T12:33:46.140Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:33:46.153Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 1, delay 500ms","timestamp":"2025-04-05T12:33:46.154Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:33:46.155Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:33:46.661Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 2, delay 1000ms","timestamp":"2025-04-05T12:33:46.663Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:33:46.664Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:33:47.666Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 3, delay 1500ms","timestamp":"2025-04-05T12:33:47.666Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:33:47.667Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:33:49.183Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 4, delay 2000ms","timestamp":"2025-04-05T12:33:49.184Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:33:49.185Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:33:51.188Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 5, delay 2500ms","timestamp":"2025-04-05T12:33:51.190Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:33:51.191Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:33:53.706Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 6, delay 3000ms","timestamp":"2025-04-05T12:33:53.707Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:33:53.708Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:33:56.720Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 7, delay 3500ms","timestamp":"2025-04-05T12:33:56.721Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:33:56.722Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:34:00.229Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 8, delay 4000ms","timestamp":"2025-04-05T12:34:00.230Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:34:00.233Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:34:04.242Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 9, delay 4500ms","timestamp":"2025-04-05T12:34:04.243Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:34:04.245Z"}
+{"level":"error","message":"Redis Client Error: connect ECONNREFUSED 127.0.0.1:6379","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1555:16)","status":"connecting","timestamp":"2025-04-05T12:34:08.752Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 10, delay 5000ms","timestamp":"2025-04-05T12:34:08.753Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T12:34:08.754Z"}
+{"level":"info","message":"Redis connected successfully","timestamp":"2025-04-05T12:34:13.771Z"}
+{"level":"info","message":"Starting server...","timestamp":"2025-04-05T13:47:05.662Z"}
+{"level":"info","message":"Redis connected successfully","timestamp":"2025-04-05T13:47:06.004Z"}
+{"level":"info","message":"Redis is ready to accept commands","timestamp":"2025-04-05T13:47:06.239Z"}
+{"level":"info","message":"Redis is ready to accept commands","timestamp":"2025-04-05T13:47:06.239Z"}
+{"level":"info","message":"Attempting to load users from Vercel Blob Storage...","timestamp":"2025-04-05T13:47:06.240Z"}
+{"level":"info","message":"Loaded users from Redis cache, took 196ms","timestamp":"2025-04-05T13:47:06.436Z"}
+{"level":"info","message":"Starting server initialization...","timestamp":"2025-04-05T14:35:27.275Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:27.816Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 1, delay 500ms","timestamp":"2025-04-05T14:35:27.819Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:27.819Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:28.722Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 2, delay 1000ms","timestamp":"2025-04-05T14:35:28.724Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:28.724Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:30.127Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 3, delay 1500ms","timestamp":"2025-04-05T14:35:30.128Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:30.129Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:32.038Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 4, delay 2000ms","timestamp":"2025-04-05T14:35:32.039Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:32.040Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:34.524Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 5, delay 2500ms","timestamp":"2025-04-05T14:35:34.525Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:34.526Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:37.425Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 6, delay 3000ms","timestamp":"2025-04-05T14:35:37.426Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:37.427Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:40.913Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 7, delay 3500ms","timestamp":"2025-04-05T14:35:40.914Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:40.914Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:44.809Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 8, delay 4000ms","timestamp":"2025-04-05T14:35:44.811Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:44.812Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:49.287Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 9, delay 4500ms","timestamp":"2025-04-05T14:35:49.288Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:49.289Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:54.264Z"}
+{"level":"info","message":"Retrying Redis connection, attempt 10, delay 5000ms","timestamp":"2025-04-05T14:35:54.266Z"}
+{"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-05T14:35:54.266Z"}
+{"level":"error","message":"Redis Client Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","redisUrl":"redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808","stack":"Error: F0200000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\\ws\\deps\\openssl\\openssl\\ssl\\record\\ssl3_record.c:355:\n","status":"connecting","timestamp":"2025-04-05T14:35:59.754Z"}
