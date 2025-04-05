@@ -239,18 +239,14 @@ const loadQuestions = async (questionsFile) => {
       }
     }
 
-    // Читаем файл с локального диска
-    const filePath = path.join(__dirname, questionsFile); // Формируем полный путь к файлу
-    logger.info(`Reading questions file from disk: ${filePath}`);
-
-    // Проверяем, существует ли файл
-    if (!fs.existsSync(filePath)) {
-      logger.error(`File ${filePath} does not exist`);
-      return []; // Возвращаем пустой массив, если файл не найден
+    // Загружаем файл из Vercel Blob Storage
+    const blobUrl = `${BLOB_BASE_URL}/${questionsFile}`;
+    logger.info(`Fetching questions from URL: ${blobUrl}`);
+    const response = await get(blobUrl);
+    if (!response.ok) {
+      throw new Error(`Не удалось загрузить файл ${blobUrl}: ${response.statusText}`);
     }
-
-    // Читаем файл асинхронно
-    const buffer = await fs.promises.readFile(filePath);
+    const buffer = Buffer.from(await response.arrayBuffer());
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
