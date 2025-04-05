@@ -1,19 +1,15 @@
 {
-  "builds": [
-    {
-      "src": "server.js",
-      "use": "@vercel/node"
+  "functions": {
+    "server.js": {
+      "memory": 1024,
+      "maxDuration": 30,
+      "includeFiles": ["questions1.xlsx", "questions2.xlsx"]
     }
-  ],
+  },
   "routes": [
     {
       "src": "/(.*)",
       "dest": "server.js"
     }
-  ],
-  "functions": {
-    "server.js": {
-      "includeFiles": ["questions1.xlsx", "questions2.xlsx"]
-    }
-  }
+  ]
 }

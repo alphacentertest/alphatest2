@@ -2,7 +2,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
-const path = require('path'); // Объявляем path только здесь
+const path = require('path');
 const fs = require('fs');
 const Redis = require('ioredis');
 const logger = require('./logger');
@@ -136,6 +136,22 @@ let testNames = {
   '1': { name: 'Тест 1', timeLimit: 3600, questionsFile: 'questions1.xlsx' },
   '2': { name: 'Тест 2', timeLimit: 3600, questionsFile: 'questions2.xlsx' },
 };
+
+// Middleware для проверки инициализации
+const ensureInitialized = (req, res, next) => {
+  if (!isInitialized) {
+    if (initializationError) {
+      logger.error(`Server initialization failed: ${initializationError.message}`);
+      return res.status(500).json({ success: false, message: `Server initialization failed: ${initializationError.message}` });
+    }
+    logger.warn('Server is initializing, please try again later');
+    return res.status(503).json({ success: false, message: 'Server is initializing, please try again later' });
+  }
+  next();
+};
+
+// Применяем middleware ко всем маршрутам
+app.use(ensureInitialized);
 
 // Функция форматирования времени
 const formatDuration = (seconds) => {
@@ -395,62 +411,40 @@ const checkAdmin = (req, res, next) => {
 // Инициализация сервера
 const initializeServer = async () => {
   const startTime = Date.now();
-  const maxAttempts = 5;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      logger.info(`Starting server initialization (Attempt ${attempt} of ${maxAttempts})`);
-      await ensureRedisConnected();
+  logger.info('Starting server initialization');
 
-      if (!redisReady) {
-        throw new Error('Redis is not ready after connection attempt');
-      }
-
-      // Загрузка testNames из Redis
-      if (redisReady) {
-        const testNamesData = await redis.get('testNames');
-        testNames = testNamesData ? JSON.parse(testNamesData) : {
-          '1': { name: 'Тест 1', timeLimit: 3600, questionsFile: 'questions1.xlsx' },
-          '2': { name: 'Тест 2', timeLimit: 3600, questionsFile: 'questions2.xlsx' },
-        };
-        await redis.set('testNames', JSON.stringify(testNames));
-      }
-      logger.info('Test names loaded:', testNames);
-
-      validPasswords = await loadUsers();
-      logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
-      isInitialized = true;
-      initializationError = null;
-      return true;
-    } catch (error) {
-      logger.error(`Failed to initialize server (Attempt ${attempt} of ${maxAttempts}), took ${Date.now() - startTime}ms:`, error.message, error.stack);
-      if (attempt === maxAttempts) {
-        initializationError = error;
-        return false;
-      }
-      await new Promise(resolve => setTimeout(resolve, 2000));
+  try {
+    // Проверяем статус Redis перед попыткой подключения
+    if (redis.status === 'ready') {
+      logger.info('Redis is already connected');
+      redisReady = true;
+    } else if (redis.status !== 'connecting' && redis.status !== 'connect') {
+      logger.info('Connecting to Redis...');
+      await redis.connect();
+      redisReady = true;
+      logger.info('Redis connected');
+    } else {
+      logger.info('Redis is already connecting, waiting for connection...');
+      await new Promise((resolve) => {
+        redis.once('ready', () => {
+          redisReady = true;
+          logger.info('Redis connected');
+          resolve();
+        });
+      });
     }
+
+    await loadUsers();
+    logger.info('Users loaded successfully');
+
+    isInitialized = true;
+    logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
+  } catch (error) {
+    initializationError = error;
+    logger.error(`Failed to initialize server, took ${Date.now() - startTime}ms:`, error.stack);
+    throw error;
   }
 };
-
-// Middleware для проверки инициализации
-const checkInitialization = (req, res, next) => {
-  if (!isInitialized) {
-    logger.warn('Server not initialized yet');
-    return res.status(503).send('Сервер ще ініціалізується. Спробуйте пізніше.');
-  }
-  if (initializationError) {
-    logger.error('Server initialization failed:', initializationError.message);
-    return res.status(500).send('Помилка ініціалізації сервера: ' + initializationError.message);
-  }
-  if (!redisReady) {
-    logger.warn('Redis not ready');
-    return res.status(503).send('Сервер ще ініціалізується. Спробуйте пізніше.');
-  }
-  next();
-};
-
-// Применяем middleware ко всем маршрутам
-app.use(checkInitialization);
 
 // Обработка favicon.ico и favicon.png
 app.get('/favicon.ico', (req, res) => {
@@ -467,15 +461,6 @@ app.get('/', async (req, res) => {
   logger.info('Handling GET /');
 
   try {
-    if (!isInitialized && !initializationError) {
-      isInitialized = await initializeServer();
-    }
-
-    if (!isInitialized) {
-      logger.error('Server initialization failed, cannot proceed');
-      return res.status(500).send('Помилка ініціалізації сервера');
-    }
-
     const user = req.cookies.auth;
     if (user) {
       logger.info(`User already authenticated, redirecting, took ${Date.now() - startTime}ms`);
@@ -491,75 +476,75 @@ app.get('/', async (req, res) => {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Вхід</title>
           <style>
-            body { 
-              font-size: 16px; 
-              margin: 0; 
-              display: flex; 
-              justify-content: center; 
-              align-items: center; 
-              min-height: 100vh; 
-              flex-direction: column; 
+            body {
+              font-size: 16px;
+              margin: 0;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              flex-direction: column;
             }
-            .container { 
-              display: flex; 
-              flex-direction: column; 
-              align-items: center; 
-              width: 100%; 
-              max-width: 400px; 
-              padding: 20px; 
-              box-sizing: border-box; 
+            .container {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              width: 100%;
+              max-width: 400px;
+              padding: 20px;
+              box-sizing: border-box;
             }
-            h1 { 
-              font-size: 24px; 
-              margin-bottom: 20px; 
-              text-align: center; 
+            h1 {
+              font-size: 24px;
+              margin-bottom: 20px;
+              text-align: center;
             }
-            form { 
-              width: 100%; 
-              max-width: 300px; 
+            form {
+              width: 100%;
+              max-width: 300px;
             }
-            label { 
-              display: block; 
-              margin: 10px 0 5px; 
+            label {
+              display: block;
+              margin: 10px 0 5px;
             }
-            input[type="text"], input[type="password"] { 
-              font-size: 16px; 
-              padding: 5px; 
-              width: 100%; 
-              box-sizing: border-box; 
+            input[type="text"], input[type="password"] {
+              font-size: 16px;
+              padding: 5px;
+              width: 100%;
+              box-sizing: border-box;
             }
-            #password { 
-              background-color: #d3d3d3; 
+            #password {
+              background-color: #d3d3d3;
             }
-            button { 
-              font-size: 16px; 
-              padding: 10px 20px; 
-              border: none; 
-              border-radius: 5px; 
-              background-color: #007bff; 
-              color: white; 
-              cursor: pointer; 
-              margin-top: 10px; 
-              display: block; 
-              width: 100%; 
+            button {
+              font-size: 16px;
+              padding: 10px 20px;
+              border: none;
+              border-radius: 5px;
+              background-color: #007bff;
+              color: white;
+              cursor: pointer;
+              margin-top: 10px;
+              display: block;
+              width: 100%;
             }
-            button:hover { 
-              background-color: #0056b3; 
+            button:hover {
+              background-color: #0056b3;
             }
-            .error { 
-              color: red; 
-              margin-top: 10px; 
-              text-align: center; 
+            .error {
+              color: red;
+              margin-top: 10px;
+              text-align: center;
             }
-            .password-container { 
-              position: relative; 
+            .password-container {
+              position: relative;
             }
-            .eye-icon { 
-              position: absolute; 
-              right: 10px; 
-              top: 50%; 
-              transform: translateY(-50%); 
-              cursor: pointer; 
+            .eye-icon {
+              position: absolute;
+              right: 10px;
+              top: 50%;
+              transform: translateY(-50%);
+              cursor: pointer;
             }
           </style>
         </head>
@@ -696,51 +681,51 @@ app.get('/select-test', checkAuth, async (req, res) => {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Вибір тесту</title>
           <style>
-            body { 
-              font-size: 32px; 
-              margin: 20px; 
-              text-align: center; 
-              display: flex; 
-              flex-direction: column; 
-              align-items: center; 
-              min-height: 100vh; 
+            body {
+              font-size: 32px;
+              margin: 20px;
+              text-align: center;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              min-height: 100vh;
             }
-            h1 { 
-              margin-bottom: 20px; 
+            h1 {
+              margin-bottom: 20px;
             }
-            .tests { 
-              display: flex; 
-              flex-direction: column; 
-              align-items: center; 
-              gap: 10px; 
-              width: 100%; 
-              max-width: 500px; 
+            .tests {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              gap: 10px;
+              width: 100%;
+              max-width: 500px;
             }
-            button { 
-              font-size: 32px; 
-              padding: 10px 20px; 
-              width: 100%; 
-              border: none; 
-              border-radius: 5px; 
-              background-color: #007bff; 
-              color: white; 
-              cursor: pointer; 
+            button {
+              font-size: 32px;
+              padding: 10px 20px;
+              width: 100%;
+              border: none;
+              border-radius: 5px;
+              background-color: #007bff;
+              color: white;
+              cursor: pointer;
             }
-            button:hover { 
-              background-color: #0056b3; 
+            button:hover {
+              background-color: #0056b3;
             }
             @media (max-width: 1024px) {
-              body { 
-                font-size: 48px; 
-                margin: 30px; 
+              body {
+                font-size: 48px;
+                margin: 30px;
               }
-              h1 { 
-                font-size: 64px; 
-                margin-bottom: 30px; 
+              h1 {
+                font-size: 64px;
+                margin-bottom: 30px;
               }
-              button { 
-                font-size: 48px; 
-                padding: 15px 30px; 
+              button {
+                font-size: 48px;
+                padding: 15px 30px;
               }
             }
           </style>
@@ -839,130 +824,130 @@ app.get('/test/question', checkAuth, async (req, res) => {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>${testNames[testNumber].name}</title>
           <style>
-            body { 
-              font-size: 32px; 
-              margin: 20px; 
-              text-align: center; 
-              display: flex; 
-              flex-direction: column; 
-              align-items: center; 
-              min-height: 100vh; 
+            body {
+              font-size: 32px;
+              margin: 20px;
+              text-align: center;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              min-height: 100vh;
             }
-            h1 { 
-              margin-bottom: 10px; 
+            h1 {
+              margin-bottom: 10px;
             }
-            .timer { 
-              font-size: 32px; 
-              margin-bottom: 20px; 
+            .timer {
+              font-size: 32px;
+              margin-bottom: 20px;
             }
-            .progress { 
-              margin-bottom: 20px; 
+            .progress {
+              margin-bottom: 20px;
             }
-            img { 
-              max-width: 100%; 
-              height: auto; 
-              margin-bottom: 20px; 
+            img {
+              max-width: 100%;
+              height: auto;
+              margin-bottom: 20px;
             }
-            .question { 
-              margin-bottom: 20px; 
+            .question {
+              margin-bottom: 20px;
             }
-            .options { 
-              display: flex; 
-              flex-direction: column; 
-              align-items: center; 
-              gap: 10px; 
-              margin-bottom: 20px; 
-            }
-            .option { 
-              font-size: 32px; 
-              padding: 10px; 
-              width: 100%; 
-              max-width: 500px; 
-              border: 1px solid #ccc; 
-              border-radius: 5px; 
-              background-color: #f0f0f0; 
-              cursor: pointer; 
-              text-align: left; 
-            }
-            .option.selected { 
-              background-color: #007bff; 
-              color: white; 
-            }
-            .option.ordering { 
-              cursor: move; 
-            }
-            input[type="text"] { 
-              font-size: 32px; 
-              padding: 10px; 
-              width: 100%; 
-              max-width: 500px; 
-              margin-bottom: 20px; 
-              box-sizing: border-box; 
-            }
-            .buttons { 
-              display: flex; 
-              justify-content: center; 
+            .options {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
               gap: 10px;
-              width: 100%; 
-              max-width: 500px; 
+              margin-bottom: 20px;
             }
-            button { 
-              font-size: 32px; 
-              padding: 10px 20px; 
-              border: none; 
-              border-radius: 5px; 
-              cursor: pointer; 
-              flex: 1; 
+            .option {
+              font-size: 32px;
+              padding: 10px;
+              width: 100%;
+              max-width: 500px;
+              border: 1px solid #ccc;
+              border-radius: 5px;
+              background-color: #f0f0f0;
+              cursor: pointer;
+              text-align: left;
             }
-            #prevBtn { 
-              background-color: #6c757d; 
-              color: white; 
+            .option.selected {
+              background-color: #007bff;
+              color: white;
             }
-            #nextBtn { 
-              background-color: #007bff; 
-              color: white; 
+            .option.ordering {
+              cursor: move;
             }
-            button:disabled { 
-              background-color: #cccccc; 
-              cursor: not-allowed; 
+            input[type="text"] {
+              font-size: 32px;
+              padding: 10px;
+              width: 100%;
+              max-width: 500px;
+              margin-bottom: 20px;
+              box-sizing: border-box;
+            }
+            .buttons {
+              display: flex;
+              justify-content: center;
+              gap: 10px;
+              width: 100%;
+              max-width: 500px;
+            }
+            button {
+              font-size: 32px;
+              padding: 10px 20px;
+              border: none;
+              border-radius: 5px;
+              cursor: pointer;
+              flex: 1;
+            }
+            #prevBtn {
+              background-color: #6c757d;
+              color: white;
+            }
+            #nextBtn {
+              background-color: #007bff;
+              color: white;
+            }
+            button:disabled {
+              background-color: #cccccc;
+              cursor: not-allowed;
             }
             @media (max-width: 1024px) {
-              body { 
-                font-size: 48px; 
-                margin: 30px; 
+              body {
+                font-size: 48px;
+                margin: 30px;
               }
-              h1 { 
-                font-size: 42px; 
-                margin-bottom: 15px; 
+              h1 {
+                font-size: 42px;
+                margin-bottom: 15px;
               }
-              .timer { 
-                font-size: 32px; 
-                margin-bottom: 30px; 
+              .timer {
+                font-size: 32px;
+                margin-bottom: 30px;
               }
-              .progress span { 
-                width: 40px; 
-                height: 40px; 
-                line-height: 40px; 
-                font-size: 24px; 
-                margin: 3px; 
+              .progress span {
+                width: 40px;
+                height: 40px;
+                line-height: 40px;
+                font-size: 24px;
+                margin: 3px;
               }
-              .question { 
-                font-size: 32px; 
-                margin-bottom: 30px; 
+              .question {
+                font-size: 32px;
+                margin-bottom: 30px;
               }
-              .option { 
-                font-size: 24px; 
-                padding: 15px; 
-                max-width: 100%; 
+              .option {
+                font-size: 24px;
+                padding: 15px;
+                max-width: 100%;
               }
-              input[type="text"] { 
-                font-size: 24px; 
-                padding: 15px; 
-                max-width: 100%; 
+              input[type="text"] {
+                font-size: 24px;
+                padding: 15px;
+                max-width: 100%;
               }
-              button { 
-                font-size: 32px; 
-                padding: 15px 30px; 
+              button {
+                font-size: 32px;
+                padding: 15px 30px;
               }
             }
           </style>
@@ -1172,53 +1157,53 @@ app.get('/test/finish', checkAuth, async (req, res) => {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Тест завершено</title>
           <style>
-            body { 
-              font-size: 32px; 
-              margin: 20px; 
-              text-align: center; 
-              display: flex; 
-              flex-direction: column; 
-              align-items: center; 
-              min-height: 100vh; 
+            body {
+              font-size: 32px;
+              margin: 20px;
+              text-align: center;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              min-height: 100vh;
             }
-            h1 { 
-              margin-bottom: 20px; 
+            h1 {
+              margin-bottom: 20px;
             }
-            p { 
-              margin: 10px 0; 
+            p {
+              margin: 10px 0;
             }
-            button { 
-              font-size: 32px; 
-              padding: 10px 20px; 
-              margin: 20px; 
-              width: 100%; 
-              max-width: 300px; 
-              border: none; 
-              border-radius: 5px; 
-              background-color: #007bff; 
-              color: white; 
-              cursor: pointer; 
+            button {
+              font-size: 32px;
+              padding: 10px 20px;
+              margin: 20px;
+              width: 100%;
+              max-width: 300px;
+              border: none;
+              border-radius: 5px;
+              background-color: #007bff;
+              color: white;
+              cursor: pointer;
             }
-            button:hover { 
-              background-color: #0056b3; 
+            button:hover {
+              background-color: #0056b3;
             }
             @media (max-width: 1024px) {
-              body { 
-                font-size: 48px; 
-                margin: 30px; 
+              body {
+                font-size: 48px;
+                margin: 30px;
               }
-              h1 { 
-                font-size: 64px; 
-                margin-bottom: 30px; 
+              h1 {
+                font-size: 64px;
+                margin-bottom: 30px;
               }
-              p { 
-                font-size: 48px; 
+              p {
+                font-size: 48px;
               }
-              button { 
-                font-size: 48px; 
-                padding: 15px 30px; 
-                margin: 30px; 
-                max-width: 100%; 
+              button {
+                font-size: 48px;
+                padding: 15px 30px;
+                margin: 30px;
+                max-width: 100%;
               }
             }
           </style>
@@ -1800,14 +1785,11 @@ app.use((err, req, res, next) => {
 });
 
 // Запуск сервера
-const PORT = process.env.PORT || 3000;
-
 const startServer = async () => {
   const startTime = Date.now();
   logger.info('Starting server...');
 
   try {
-    // Инициализация сервера перед запуском
     await initializeServer();
 
     if (!isInitialized) {
@@ -1815,47 +1797,93 @@ const startServer = async () => {
       process.exit(1);
     }
 
+    logger.info(`Server is ready, initialization took ${Date.now() - startTime} ms`);
+
+    const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
-      logger.info(`Server is running on port ${PORT}, initialization took ${Date.now() - startTime}ms`);
+      logger.info(`Server running on port ${PORT}`);
     });
+
+    // Обработка завершения работы сервера
+    process.on('SIGTERM', async () => {
+      logger.info('Received SIGTERM, shutting down gracefully...');
+      try {
+        await redis.quit();
+        logger.info('Redis connection closed');
+      } catch (err) {
+        logger.error('Error closing Redis connection:', err.stack);
+      }
+      process.exit(0);
+    });
+
+    process.on('SIGINT', async () => {
+      logger.info('Received SIGINT, shutting down gracefully...');
+      try {
+        await redis.quit();
+        logger.info('Redis connection closed');
+      } catch (err) {
+        logger.error('Error closing Redis connection:', err.stack);
+      }
+      process.exit(0);
+    });
+
+    process.on('uncaughtException', (err) => {
+      logger.error('Uncaught Exception:', err.stack);
+      process.exit(1);
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('Unhandled Rejection at:', promise, 'reason:', reason.stack || reason);
+      process.exit(1);
+    });
+
   } catch (error) {
-    logger.error(`Failed to start server, took ${Date.now() - startTime}ms:`, error.stack);
+    logger.error('Failed to start server:', error.stack);
     process.exit(1);
   }
 };
 
-// Обработка graceful shutdown
-const shutdown = async () => {
-  logger.info('Received shutdown signal, closing server...');
-  try {
-    // Закрываем соединение с Redis
-    if (redis) {
-      await redis.quit();
-      logger.info('Redis connection closed');
-    }
-  } catch (error) {
-    logger.error('Error during Redis shutdown:', error.stack);
-  } finally {
-    logger.info('Server shutdown complete');
-    process.exit(0);
-  }
+// Обработка завершения работы сервера
+process.on('SIGTERM', async () => {
+logger.info('Received SIGTERM, shutting down gracefully...');
+try {
+await redis.quit(); // Закрываем соединение с Redis
+logger.info('Redis connection closed');
+} catch (err) {
+logger.error('Error closing Redis connection:', err.stack);
+}
+process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+logger.info('Received SIGINT, shutting down gracefully...');
+try {
+await redis.quit(); // Закрываем соединение с Redis
+logger.info('Redis connection closed');
+} catch (err) {
+logger.error('Error closing Redis connection:', err.stack);
+}
+process.exit(0);
+});
+
+// Обработка непредвиденных ошибок
+process.on('uncaughtException', (err) => {
+logger.error('Uncaught Exception:', err.stack);
+process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+logger.error('Unhandled Rejection at:', promise, 'reason:', reason.stack || reason);
+process.exit(1);
+});
+
+} catch (error) {
+logger.error('Failed to start server:', error.stack);
+process.exit(1);
+}
 };
 
-// Обработка сигналов завершения
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-
-// Обработка необработанных исключений
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error.stack);
-  shutdown();
-});
-
-// Обработка необработанных отклонений промисов
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  shutdown();
-});
-
-// Запускаем сервер
+// Запуск сервера
 startServer();
+
+module.exports = app; // Экспорт приложения для возможного использования в тестах или других модулях
