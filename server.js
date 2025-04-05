@@ -4,42 +4,21 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
-const Redis = require('ioredis'); // Используем ioredis вместо redis
-const logger = require('./logger');
+const Redis = require('ioredis');
+const logger = require('./logger'); // Импортируем логгер из отдельного файла
 const AWS = require('aws-sdk');
 const { put, get } = require('@vercel/blob');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
-const winston = require('winston');
 require('dotenv').config();
 
 // Инициализация приложения
 const app = express();
 
-// Настройка логирования
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-    new winston.transports.Console()
-  ],
-});
-
-// Логирование всех запросов
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url} - IP: ${req.ip}`);
-  next();
-});
-
-// Настройка Redis с ioredis
-// Используем REDIS_URL из переменных окружения
+// Настройка Redis
+let redisAvailable = false;
 const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
   connectTimeout: 10000, // 10 секунд
   retryStrategy(times) {
@@ -48,10 +27,12 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
 });
 
 redis.on('error', (err) => {
+  redisAvailable = false;
   logger.error('Redis Client Error:', err);
 });
 
 redis.on('connect', () => {
+  redisAvailable = true;
   logger.info('Redis connected successfully');
 });
 
@@ -59,27 +40,16 @@ redis.on('reconnecting', () => {
   logger.warn('Redis reconnecting...');
 });
 
-module.exports = redis;
-
-// Пример использования
-app.post('/login', async (req, res) => {
-  if (redisAvailable) {
-    // Используем Redis
-    await redis.set('key', 'value');
-  } else {
-    // Fallback: храним в памяти или пропускаем
-    logger.warn('Redis unavailable, skipping cache');
-  }
-  // Продолжаем логику входа
-});
-
+// Функция проверки подключения к Redis
 const ensureRedisConnected = async () => {
-  if (!redisClient.status || redisClient.status === 'close') {
+  if (redis.status === 'close') {
     logger.info('Redis client is closed, attempting to reconnect...');
     try {
-      await redisClient.connect();
+      await redis.connect();
+      redisAvailable = true;
       logger.info('Redis reconnected successfully');
     } catch (err) {
+      redisAvailable = false;
       logger.error('Failed to reconnect to Redis:', err.message, err.stack);
       throw err;
     }
@@ -103,6 +73,16 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(helmet());
+
+// Логирование всех запросов
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  logger.info(`${req.method} ${req.url} - IP: ${req.ip}`);
+  res.on('finish', () => {
+    logger.info(`${req.method} ${req.url} completed in ${Date.now() - startTime}ms`);
+  });
+  next();
+});
 
 // Настройка ограничения скорости для маршрута логина
 const loginLimiter = rateLimit({
@@ -148,8 +128,10 @@ const formatDuration = (seconds) => {
 
 // Загрузка пользователей из Vercel Blob Storage
 const loadUsers = async () => {
+  const startTime = Date.now();
+  logger.info('Attempting to load users from Vercel Blob Storage...');
+
   try {
-    logger.info('Attempting to load users from Vercel Blob Storage...');
     const blobUrl = `${BLOB_BASE_URL}/users-C2sivyAPoIF7lPXTbhfNjFMVyLNN5h.xlsx`;
     logger.info(`Fetching users from URL: ${blobUrl}`);
     const response = await get(blobUrl);
@@ -170,8 +152,9 @@ const loadUsers = async () => {
     logger.info('Worksheet found:', sheet.name);
 
     const users = {};
-    await ensureRedisConnected();
-    await redisClient.del('users'); // Очищаем старые данные
+    if (redisAvailable) {
+      await redis.del('users'); // Очищаем старые данные
+    }
 
     const userRows = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
@@ -189,26 +172,41 @@ const loadUsers = async () => {
     const saltRounds = 10;
     for (const { username, password } of userRows) {
       const hashedPassword = await bcrypt.hash(password, saltRounds);
-      await redisClient.hset('users', username, hashedPassword);
+      if (redisAvailable) {
+        await redis.hset('users', username, hashedPassword);
+      }
       users[username] = password; // Для локального использования
     }
 
     if (Object.keys(users).length === 0) {
       throw new Error('Не знайдено користувачів у файлі');
     }
-    logger.info('Loaded users and stored in Redis');
+    logger.info(`Loaded users and stored in Redis, took ${Date.now() - startTime}ms`);
     return users;
   } catch (error) {
-    logger.error('Error loading users from Blob Storage:', error.message, error.stack);
+    logger.error(`Error loading users from Blob Storage, took ${Date.now() - startTime}ms:`, error.message, error.stack);
     throw error;
   }
 };
 
-// Загрузка вопросов для теста
+// Загрузка вопросов для теста с кэшированием
 const loadQuestions = async (questionsFile) => {
+  const startTime = Date.now();
+  const cacheKey = `questions:${questionsFile}`;
+  logger.info(`Loading questions for ${questionsFile}`);
+
   try {
+    // Проверяем кэш в Redis
+    if (redisAvailable) {
+      const cachedQuestions = await redis.get(cacheKey);
+      if (cachedQuestions) {
+        logger.info(`Loaded ${questionsFile} from Redis cache, took ${Date.now() - startTime}ms`);
+        return JSON.parse(cachedQuestions);
+      }
+    }
+
     const questionsFileUrl = `${BLOB_BASE_URL}/${questionsFile}`;
-    logger.info(`Loading questions from ${questionsFileUrl}`);
+    logger.info(`Fetching questions from ${questionsFileUrl}`);
     const response = await get(questionsFileUrl);
     if (!response.ok) {
       throw new Error(`Не удалось загрузить файл ${questionsFileUrl}: ${response.statusText}`);
@@ -257,46 +255,62 @@ const loadQuestions = async (questionsFile) => {
       throw new Error('Питання не знайдено');
     }
 
-    logger.info(`Loaded ${questions.length} questions from ${questionsFile}`);
+    // Сохраняем в кэш на 1 час
+    if (redisAvailable) {
+      await redis.set(cacheKey, JSON.stringify(questions), 'EX', 3600);
+      logger.info(`Cached ${questionsFile} in Redis`);
+    }
+
+    logger.info(`Loaded ${questions.length} questions from ${questionsFile}, took ${Date.now() - startTime}ms`);
     return questions;
   } catch (error) {
-    logger.error(`Error loading questions from ${questionsFile}:`, error.message, error.stack);
+    logger.error(`Error loading questions from ${questionsFile}, took ${Date.now() - startTime}ms:`, error.message, error.stack);
     throw error;
   }
 };
 
 // Получение и установка режима камеры
 const getCameraMode = async () => {
-  await ensureRedisConnected();
-  const mode = await redisClient.get('cameraMode');
-  return mode === 'true';
+  if (redisAvailable) {
+    const mode = await redis.get('cameraMode');
+    return mode === 'true';
+  }
+  return false; // Fallback
 };
 
 const setCameraMode = async (mode) => {
-  await ensureRedisConnected();
-  await redisClient.set('cameraMode', String(mode));
+  if (redisAvailable) {
+    await redis.set('cameraMode', String(mode));
+  }
 };
 
 // Получение и установка данных теста пользователя
 const getUserTest = async (user) => {
-  await ensureRedisConnected();
-  const testData = await redisClient.hget('userTests', user);
-  return testData ? JSON.parse(testData) : null;
+  if (redisAvailable) {
+    const testData = await redis.hget('userTests', user);
+    return testData ? JSON.parse(testData) : null;
+  }
+  return null; // Fallback
 };
 
 const setUserTest = async (user, testData) => {
-  await ensureRedisConnected();
-  await redisClient.hset('userTests', user, JSON.stringify(testData));
+  if (redisAvailable) {
+    await redis.hset('userTests', user, JSON.stringify(testData));
+  }
 };
 
 const deleteUserTest = async (user) => {
-  await ensureRedisConnected();
-  await redisClient.hdel('userTests', user);
+  if (redisAvailable) {
+    await redis.hdel('userTests', user);
+  }
 };
 
 // Сохранение результата теста
 const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousBehavior, answers, questions) => {
-  await ensureRedisConnected();
+  if (!redisAvailable) {
+    logger.warn('Redis unavailable, skipping result save');
+    return;
+  }
   const duration = Math.round((endTime - startTime) / 1000);
   const result = {
     user,
@@ -329,7 +343,7 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       return 0;
     }),
   };
-  await redisClient.rpush('test_results', JSON.stringify(result));
+  await redis.rpush('test_results', JSON.stringify(result));
 };
 
 // Проверка авторизации
@@ -356,6 +370,7 @@ const checkAdmin = (req, res, next) => {
 
 // Инициализация сервера
 const initializeServer = async () => {
+  const startTime = Date.now();
   const maxAttempts = 5;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -363,21 +378,23 @@ const initializeServer = async () => {
       await ensureRedisConnected();
 
       // Загрузка testNames из Redis
-      const testNamesData = await redisClient.get('testNames');
-      testNames = testNamesData ? JSON.parse(testNamesData) : {
-        '1': { name: 'Тест 1', timeLimit: 3600, questionsFile: 'questions1.xlsx' },
-        '2': { name: 'Тест 2', timeLimit: 3600, questionsFile: 'questions2.xlsx' },
-      };
-      await redisClient.set('testNames', JSON.stringify(testNames));
+      if (redisAvailable) {
+        const testNamesData = await redis.get('testNames');
+        testNames = testNamesData ? JSON.parse(testNamesData) : {
+          '1': { name: 'Тест 1', timeLimit: 3600, questionsFile: 'questions1.xlsx' },
+          '2': { name: 'Тест 2', timeLimit: 3600, questionsFile: 'questions2.xlsx' },
+        };
+        await redis.set('testNames', JSON.stringify(testNames));
+      }
       logger.info('Test names loaded:', testNames);
 
       validPasswords = await loadUsers();
-      logger.info('Server initialized successfully');
+      logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
       isInitialized = true;
       initializationError = null;
       return true;
     } catch (error) {
-      logger.error(`Failed to initialize server (Attempt ${attempt} of ${maxAttempts}):`, error.message, error.stack);
+      logger.error(`Failed to initialize server (Attempt ${attempt} of ${maxAttempts}), took ${Date.now() - startTime}ms:`, error.message, error.stack);
       if (attempt === maxAttempts) {
         initializationError = error;
         return false;
@@ -403,131 +420,140 @@ app.use(checkInitialization);
 
 // Главная страница (вход)
 app.get('/', async (req, res) => {
-  if (!isInitialized && !initializationError) {
-    isInitialized = await initializeServer();
-  }
+  const startTime = Date.now();
+  logger.info('Handling GET /');
 
-  if (!isInitialized) {
-    logger.error('Server initialization failed, cannot proceed');
-    return res.status(500).send('Помилка ініціалізації сервера');
-  }
+  try {
+    if (!isInitialized && !initializationError) {
+      isInitialized = await initializeServer();
+    }
 
-  const user = req.cookies.auth;
-  if (user) {
-    return res.redirect(user === 'admin' ? '/admin' : '/select-test');
-  }
+    if (!isInitialized) {
+      logger.error('Server initialization failed, cannot proceed');
+      return res.status(500).send('Помилка ініціалізації сервера');
+    }
 
-  const savedPassword = req.cookies.savedPassword || '';
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Вхід</title>
-        <style>
-          body { 
-            font-size: 16px; 
-            margin: 0; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            min-height: 100vh; 
-            flex-direction: column; 
-          }
-          .container { 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            width: 100%; 
-            max-width: 400px; 
-            padding: 20px; 
-            box-sizing: border-box; 
-          }
-          h1 { 
-            font-size: 24px; 
-            margin-bottom: 20px; 
-            text-align: center; 
-          }
-          form { 
-            width: 100%; 
-            max-width: 300px; 
-          }
-          label { 
-            display: block; 
-            margin: 10px 0 5px; 
-          }
-          input[type="text"], input[type="password"] { 
-            font-size: 16px; 
-            padding: 5px; 
-            width: 100%; 
-            box-sizing: border-box; 
-          }
-          #password { 
-            background-color: #d3d3d3; 
-          }
-          button { 
-            font-size: 16px; 
-            padding: 10px 20px; 
-            border: none; 
-            border-radius: 5px; 
-            background-color: #007bff; 
-            color: white; 
-            cursor: pointer; 
-            margin-top: 10px; 
-            display: block; 
-            width: 100%; 
-          }
-          button:hover { 
-            background-color: #0056b3; 
-          }
-          .error { 
-            color: red; 
-            margin-top: 10px; 
-            text-align: center; 
-          }
-          .password-container { 
-            position: relative; 
-          }
-          .eye-icon { 
-            position: absolute; 
-            right: 10px; 
-            top: 50%; 
-            transform: translateY(-50%); 
-            cursor: pointer; 
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>Вхід</h1>
-          <form action="/login" method="POST">
-            <label>Пароль:</label>
-            <div class="password-container">
-              <input type="password" id="password" name="password" value="${savedPassword}" required>
-              <span class="eye-icon" onclick="togglePassword()">👁️</span>
-            </div>
-            <label><input type="checkbox" name="rememberMe"> Запам'ятати пароль</label>
-            <button type="submit">Увійти</button>
-          </form>
-          <p id="error" class="error"></p>
-        </div>
-        <script>
-          function togglePassword() {
-            const passwordInput = document.getElementById('password');
-            const eyeIcon = document.querySelector('.eye-icon');
-            if (passwordInput.type === 'password') {
-              passwordInput.type = 'text';
-              eyeIcon.textContent = '🙈';
-            } else {
-              passwordInput.type = 'password';
-              eyeIcon.textContent = '👁️';
+    const user = req.cookies.auth;
+    if (user) {
+      logger.info(`User already authenticated, redirecting, took ${Date.now() - startTime}ms`);
+      return res.redirect(user === 'admin' ? '/admin' : '/select-test');
+    }
+
+    const savedPassword = req.cookies.savedPassword || '';
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Вхід</title>
+          <style>
+            body { 
+              font-size: 16px; 
+              margin: 0; 
+              display: flex; 
+              justify-content: center; 
+              align-items: center; 
+              min-height: 100vh; 
+              flex-direction: column; 
             }
-          }
-        </script>
-      </body>
-    </html>
-  `);
+            .container { 
+              display: flex; 
+              flex-direction: column; 
+              align-items: center; 
+              width: 100%; 
+              max-width: 400px; 
+              padding: 20px; 
+              box-sizing: border-box; 
+            }
+            h1 { 
+              font-size: 24px; 
+              margin-bottom: 20px; 
+              text-align: center; 
+            }
+            form { 
+              width: 100%; 
+              max-width: 300px; 
+            }
+            label { 
+              display: block; 
+              margin: 10px 0 5px; 
+            }
+            input[type="text"], input[type="password"] { 
+              font-size: 16px; 
+              padding: 5px; 
+              width: 100%; 
+              box-sizing: border-box; 
+            }
+            #password { 
+              background-color: #d3d3d3; 
+            }
+            button { 
+              font-size: 16px; 
+              padding: 10px 20px; 
+              border: none; 
+              border-radius: 5px; 
+              background-color: #007bff; 
+              color: white; 
+              cursor: pointer; 
+              margin-top: 10px; 
+              display: block; 
+              width: 100%; 
+            }
+            button:hover { 
+              background-color: #0056b3; 
+            }
+            .error { 
+              color: red; 
+              margin-top: 10px; 
+              text-align: center; 
+            }
+            .password-container { 
+              position: relative; 
+            }
+            .eye-icon { 
+              position: absolute; 
+              right: 10px; 
+              top: 50%; 
+              transform: translateY(-50%); 
+              cursor: pointer; 
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>Вхід</h1>
+            <form action="/login" method="POST">
+              <label>Пароль:</label>
+              <div class="password-container">
+                <input type="password" id="password" name="password" value="${savedPassword}" required>
+                <span class="eye-icon" onclick="togglePassword()">👁️</span>
+              </div>
+              <label><input type="checkbox" name="rememberMe"> Запам'ятати пароль</label>
+              <button type="submit">Увійти</button>
+            </form>
+            <p id="error" class="error"></p>
+          </div>
+          <script>
+            function togglePassword() {
+              const passwordInput = document.getElementById('password');
+              const eyeIcon = document.querySelector('.eye-icon');
+              if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                eyeIcon.textContent = '🙈';
+              } else {
+                passwordInput.type = 'password';
+                eyeIcon.textContent = '👁️';
+              }
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    logger.error(`Error in GET /, took ${Date.now() - startTime}ms:`, err);
+    res.status(500).send('Помилка сервера');
+  }
 });
 
 // Обработка входа
@@ -543,22 +569,29 @@ app.post(
     body('rememberMe').isBoolean().withMessage('rememberMe должен быть булевым значением'),
   ],
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      logger.warn('Validation errors:', errors.array());
-      return res.status(400).json({ success: false, message: errors.array()[0].msg });
-    }
-
-    const { password, rememberMe } = req.body;
-    logger.info(`Checking password for user input`);
+    const startTime = Date.now();
+    logger.info('Handling POST /login');
 
     try {
-      await ensureRedisConnected();
-      const users = await redisClient.hgetall('users');
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        logger.warn('Validation errors:', errors.array());
+        return res.status(400).json({ success: false, message: errors.array()[0].msg });
+      }
+
+      const { password, rememberMe } = req.body;
+      logger.info(`Checking password for user input`);
+
+      let users = validPasswords;
+      if (redisAvailable) {
+        const redisUsers = await redis.hgetall('users');
+        users = { ...users, ...redisUsers };
+      }
 
       let authenticatedUser = null;
-      for (const [username, hashedPassword] of Object.entries(users)) {
-        if (await bcrypt.compare(password.trim(), hashedPassword)) {
+      for (const [username, storedPassword] of Object.entries(users)) {
+        const isMatch = await bcrypt.compare(password.trim(), storedPassword);
+        if (isMatch) {
           authenticatedUser = username;
           break;
         }
@@ -587,14 +620,14 @@ app.post(
         res.clearCookie('savedPassword');
       }
 
-      logger.info(`Successful login for user: ${authenticatedUser}`);
+      logger.info(`Successful login for user: ${authenticatedUser}, took ${Date.now() - startTime}ms`);
       if (authenticatedUser === 'admin') {
         res.json({ success: true, redirect: '/admin' });
       } else {
         res.json({ success: true, redirect: '/select-test' });
       }
     } catch (error) {
-      logger.error('Error during login:', error);
+      logger.error(`Error during login, took ${Date.now() - startTime}ms:`, error);
       res.status(500).json({ success: false, message: 'Помилка сервера' });
     }
   }
@@ -602,506 +635,572 @@ app.post(
 
 // Выбор теста
 app.get('/select-test', checkAuth, async (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Вибір тесту</title>
-        <style>
-          body { 
-            font-size: 32px; 
-            margin: 20px; 
-            text-align: center; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            min-height: 100vh; 
-          }
-          h1 { 
-            margin-bottom: 20px; 
-          }
-          .tests { 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            gap: 10px; 
-            width: 100%; 
-            max-width: 500px; 
-          }
-          button { 
-            font-size: 32px; 
-            padding: 10px 20px; 
-            width: 100%; 
-            border: none; 
-            border-radius: 5px; 
-            background-color: #007bff; 
-            color: white; 
-            cursor: pointer; 
-          }
-          button:hover { 
-            background-color: #0056b3; 
-          }
-          @media (max-width: 1024px) {
+  const startTime = Date.now();
+  logger.info('Handling GET /select-test');
+
+  try {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Вибір тесту</title>
+          <style>
             body { 
-              font-size: 48px; 
-              margin: 30px; 
+              font-size: 32px; 
+              margin: 20px; 
+              text-align: center; 
+              display: flex; 
+              flex-direction: column; 
+              align-items: center; 
+              min-height: 100vh; 
             }
             h1 { 
-              font-size: 64px; 
-              margin-bottom: 30px; 
+              margin-bottom: 20px; 
+            }
+            .tests { 
+              display: flex; 
+              flex-direction: column; 
+              align-items: center; 
+              gap: 10px; 
+              width: 100%; 
+              max-width: 500px; 
             }
             button { 
-              font-size: 48px; 
-              padding: 15px 30px; 
+              font-size: 32px; 
+              padding: 10px 20px; 
+              width: 100%; 
+              border: none; 
+              border-radius: 5px; 
+              background-color: #007bff; 
+              color: white; 
+              cursor: pointer; 
             }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Виберіть тест</h1>
-        <div class="tests">
-          ${Object.entries(testNames).map(([num, data]) => `
-            <button onclick="window.location.href='/test/start?testNumber=${num}'">${data.name}</button>
-          `).join('')}
-          <button onclick="window.location.href='/logout'">Вийти</button>
-        </div>
-      </body>
-    </html>
-  `);
+            button:hover { 
+              background-color: #0056b3; 
+            }
+            @media (max-width: 1024px) {
+              body { 
+                font-size: 48px; 
+                margin: 30px; 
+              }
+              h1 { 
+                font-size: 64px; 
+                margin-bottom: 30px; 
+              }
+              button { 
+                font-size: 48px; 
+                padding: 15px 30px; 
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Виберіть тест</h1>
+          <div class="tests">
+            ${Object.entries(testNames).map(([num, data]) => `
+              <button onclick="window.location.href='/test/start?testNumber=${num}'">${data.name}</button>
+            `).join('')}
+            <button onclick="window.location.href='/logout'">Вийти</button>
+          </div>
+        </body>
+      </html>
+    `);
+    logger.info(`GET /select-test completed, took ${Date.now() - startTime}ms`);
+  } catch (err) {
+    logger.error(`Error in GET /select-test, took ${Date.now() - startTime}ms:`, err);
+    res.status(500).send('Помилка сервера');
+  }
 });
 
 // Начало теста
 app.get('/test/start', checkAuth, async (req, res) => {
-  const { testNumber } = req.query;
-  if (!testNames[testNumber]) {
-    return res.status(400).send('Тест не знайдено');
+  const startTime = Date.now();
+  logger.info('Handling GET /test/start');
+
+  try {
+    const { testNumber } = req.query;
+    if (!testNames[testNumber]) {
+      logger.warn(`Test ${testNumber} not found`);
+      return res.status(400).send('Тест не знайдено');
+    }
+
+    const questions = await loadQuestions(testNames[testNumber].questionsFile).catch(err => {
+      logger.error(`Ошибка загрузки вопросов для теста ${testNumber}, took ${Date.now() - startTime}ms:`, err.stack);
+      throw err;
+    });
+
+    const userTest = {
+      testNumber,
+      questions,
+      answers: Array(questions.length).fill(null),
+      startTime: Date.now(),
+      currentQuestion: 0,
+      suspiciousBehavior: 0,
+    };
+
+    await setUserTest(req.user, userTest);
+    logger.info(`Test ${testNumber} started for user ${req.user}, took ${Date.now() - startTime}ms`);
+    res.redirect('/test/question?index=0');
+  } catch (err) {
+    logger.error(`Error in GET /test/start, took ${Date.now() - startTime}ms:`, err);
+    res.status(500).send('Помилка сервера');
   }
-
-  const questions = await loadQuestions(testNames[testNumber].questionsFile).catch(err => {
-    logger.error(`Ошибка загрузки вопросов для теста ${testNumber}:`, err.stack);
-    return res.status(500).send('Помилка завантаження питань');
-  });
-
-  const userTest = {
-    testNumber,
-    questions,
-    answers: Array(questions.length).fill(null),
-    startTime: Date.now(),
-    currentQuestion: 0,
-    suspiciousBehavior: 0,
-  };
-
-  await setUserTest(req.user, userTest);
-  res.redirect('/test/question?index=0');
 });
 
 // Страница вопроса
 app.get('/test/question', checkAuth, async (req, res) => {
-  const userTest = await getUserTest(req.user);
-  if (!userTest) return res.status(400).send('Тест не розпочато');
+  const startTime = Date.now();
+  logger.info('Handling GET /test/question');
 
-  const { questions, testNumber, answers, startTime } = userTest;
-  const index = parseInt(req.query.index) || 0;
-  if (index < 0 || index >= questions.length) {
-    return res.status(400).send('Невірний номер питання');
-  }
+  try {
+    const userTest = await getUserTest(req.user);
+    if (!userTest) {
+      logger.warn(`Test not started for user ${req.user}`);
+      return res.status(400).send('Тест не розпочато');
+    }
 
-  const q = questions[index];
-  const progress = questions.map((_, i) => `<span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; margin: 2px; background-color: ${i === index ? '#007bff' : answers[i] ? '#28a745' : '#ccc'}; color: white; font-size: 14px;">${i + 1}</span>`).join('');
+    const { questions, testNumber, answers, startTime: testStartTime } = userTest;
+    const index = parseInt(req.query.index) || 0;
+    if (index < 0 || index >= questions.length) {
+      logger.warn(`Invalid question index ${index} for user ${req.user}`);
+      return res.status(400).send('Невірний номер питання');
+    }
 
-  const timeRemaining = testNames[testNumber].timeLimit * 1000 - (Date.now() - startTime);
-  if (timeRemaining <= 0) {
-    return res.redirect('/test/finish');
-  }
+    const q = questions[index];
+    const progress = questions.map((_, i) => `<span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; margin: 2px; background-color: ${i === index ? '#007bff' : answers[i] ? '#28a745' : '#ccc'}; color: white; font-size: 14px;">${i + 1}</span>`).join('');
 
-  const minutes = Math.floor(timeRemaining / 1000 / 60);
-  const seconds = Math.floor((timeRemaining / 1000) % 60);
+    const timeRemaining = testNames[testNumber].timeLimit * 1000 - (Date.now() - testStartTime);
+    if (timeRemaining <= 0) {
+      logger.info(`Time limit exceeded for user ${req.user}, redirecting to finish`);
+      return res.redirect('/test/finish');
+    }
 
-  const cameraEnabled = await getCameraMode();
+    const minutes = Math.floor(timeRemaining / 1000 / 60);
+    const seconds = Math.floor((timeRemaining / 1000) % 60);
 
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${testNames[testNumber].name}</title>
-        <style>
-          body { 
-            font-size: 32px; 
-            margin: 20px; 
-            text-align: center; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            min-height: 100vh; 
-          }
-          h1 { 
-            margin-bottom: 10px; 
-          }
-          .timer { 
-            font-size: 32px; 
-            margin-bottom: 20px; 
-          }
-          .progress { 
-            margin-bottom: 20px; 
-          }
-          img { 
-            max-width: 100%; 
-            height: auto; 
-            margin-bottom: 20px; 
-          }
-          .question { 
-            margin-bottom: 20px; 
-          }
-          .options { 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            gap: 10px; 
-            margin-bottom: 20px; 
-          }
-          .option { 
-            font-size: 32px; 
-            padding: 10px; 
-            width: 100%; 
-            max-width: 500px; 
-            border: 1px solid #ccc; 
-            border-radius: 5px; 
-            background-color: #f0f0f0; 
-            cursor: pointer; 
-            text-align: left; 
-          }
-          .option.selected { 
-            background-color: #007bff; 
-            color: white; 
-          }
-          .option.ordering { 
-            cursor: move; 
-          }
-          input[type="text"] { 
-            font-size: 32px; 
-            padding: 10px; 
-            width: 100%; 
-            max-width: 500px; 
-            margin-bottom: 20px; 
-            box-sizing: border-box; 
-          }
-          .buttons { 
-            display: flex; 
-            justify-content: center; 
-            gap: 10px;
-            width: 100%; 
-            max-width: 500px; 
-          }
-          button { 
-            font-size: 32px; 
-            padding: 10px 20px; 
-            border: none; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            flex: 1; 
-          }
-          #prevBtn { 
-            background-color: #6c757d; 
-            color: white; 
-          }
-          #nextBtn { 
-            background-color: #007bff; 
-            color: white; 
-          }
-          button:disabled { 
-            background-color: #cccccc; 
-            cursor: not-allowed; 
-          }
-          @media (max-width: 1024px) {
+    const cameraEnabled = await getCameraMode();
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>${testNames[testNumber].name}</title>
+          <style>
             body { 
-              font-size: 48px; 
-              margin: 30px; 
+              font-size: 32px; 
+              margin: 20px; 
+              text-align: center; 
+              display: flex; 
+              flex-direction: column; 
+              align-items: center; 
+              min-height: 100vh; 
             }
             h1 { 
-              font-size: 42px; 
-              margin-bottom: 15px; 
+              margin-bottom: 10px; 
             }
             .timer { 
               font-size: 32px; 
-              margin-bottom: 30px; 
+              margin-bottom: 20px; 
             }
-            .progress span { 
-              width: 40px; 
-              height: 40px; 
-              line-height: 40px; 
-              font-size: 24px; 
-              margin: 3px; 
+            .progress { 
+              margin-bottom: 20px; 
+            }
+            img { 
+              max-width: 100%; 
+              height: auto; 
+              margin-bottom: 20px; 
             }
             .question { 
-              font-size: 32px; 
-              margin-bottom: 30px; 
+              margin-bottom: 20px; 
+            }
+            .options { 
+              display: flex; 
+              flex-direction: column; 
+              align-items: center; 
+              gap: 10px; 
+              margin-bottom: 20px; 
             }
             .option { 
-              font-size: 24px; 
-              padding: 15px; 
-              max-width: 100%; 
+              font-size: 32px; 
+              padding: 10px; 
+              width: 100%; 
+              max-width: 500px; 
+              border: 1px solid #ccc; 
+              border-radius: 5px; 
+              background-color: #f0f0f0; 
+              cursor: pointer; 
+              text-align: left; 
+            }
+            .option.selected { 
+              background-color: #007bff; 
+              color: white; 
+            }
+            .option.ordering { 
+              cursor: move; 
             }
             input[type="text"] { 
-              font-size: 24px; 
-              padding: 15px; 
-              max-width: 100%; 
+              font-size: 32px; 
+              padding: 10px; 
+              width: 100%; 
+              max-width: 500px; 
+              margin-bottom: 20px; 
+              box-sizing: border-box; 
+            }
+            .buttons { 
+              display: flex; 
+              justify-content: center; 
+              gap: 10px;
+              width: 100%; 
+              max-width: 500px; 
             }
             button { 
               font-size: 32px; 
-              padding: 15px 30px; 
+              padding: 10px 20px; 
+              border: none; 
+              border-radius: 5px; 
+              cursor: pointer; 
+              flex: 1; 
             }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>${testNames[testNumber].name}</h1>
-        <div class="timer">Залишилося часу: ${minutes} хв ${seconds} с</div>
-        <div class="progress">${progress}</div>
-        ${q.picture ? `<img src="${q.picture}" alt="Question Image" onerror="this.src='/images/placeholder.png'">` : ''}
-        <div class="question">${q.text}</div>
-        <form id="questionForm" method="POST" action="/test/save-answer">
-          <input type="hidden" name="index" value="${index}">
-          <div class="options" id="options">
-            ${q.options && q.options.length > 0 ? q.options.map((option, i) => {
-              if (q.type === 'ordering') {
-                const userAnswer = answers[index] || q.options;
-                const idx = userAnswer.indexOf(option);
-                return `<div class="option ordering" draggable="true" data-index="${i}" style="order: ${idx}">${option}</div>`;
-              } else {
-                const isSelected = answers[index] && answers[index].includes(String(option));
-                return `
-                  <label class="option${isSelected ? ' selected' : ''}">
-                    <input type="${q.type === 'multiple' ? 'checkbox' : 'radio'}" name="answer" value="${option}" style="display: none;" ${isSelected ? 'checked' : ''}>
-                    ${option}
-                  </label>
-                `;
+            #prevBtn { 
+              background-color: #6c757d; 
+              color: white; 
+            }
+            #nextBtn { 
+              background-color: #007bff; 
+              color: white; 
+            }
+            button:disabled { 
+              background-color: #cccccc; 
+              cursor: not-allowed; 
+            }
+            @media (max-width: 1024px) {
+              body { 
+                font-size: 48px; 
+                margin: 30px; 
               }
-            }).join('') : `<input type="text" name="answer" value="${answers[index] || ''}" placeholder="Введіть відповідь">`}
-          </div>
-          <div class="buttons">
-            <button type="button" id="prevBtn" onclick="window.location.href='/test/question?index=${index - 1}'" ${index === 0 ? 'disabled' : ''}>Назад</button>
-            <button type="submit" id="nextBtn">${index === questions.length - 1 ? 'Завершити тест' : 'Вперед'}</button>
-          </div>
-        </form>
-        <button onclick="window.location.href='/logout'">Вийти</button>
-        <script>
-          const optionsDiv = document.getElementById('options');
-          const options = optionsDiv.querySelectorAll('.option:not(.ordering)');
-          options.forEach(option => {
-            option.addEventListener('click', () => {
-              const input = option.querySelector('input');
-              if (input.type === 'radio') {
-                options.forEach(opt => {
-                  opt.classList.remove('selected');
-                  opt.querySelector('input').checked = false;
-                });
-                input.checked = true;
-                option.classList.add('selected');
-              } else if (input.type === 'checkbox') {
-                input.checked = !input.checked;
-                if (input.checked) {
-                  option.classList.add('selected');
+              h1 { 
+                font-size: 42px; 
+                margin-bottom: 15px; 
+              }
+              .timer { 
+                font-size: 32px; 
+                margin-bottom: 30px; 
+              }
+              .progress span { 
+                width: 40px; 
+                height: 40px; 
+                line-height: 40px; 
+                font-size: 24px; 
+                margin: 3px; 
+              }
+              .question { 
+                font-size: 32px; 
+                margin-bottom: 30px; 
+              }
+              .option { 
+                font-size: 24px; 
+                padding: 15px; 
+                max-width: 100%; 
+              }
+              input[type="text"] { 
+                font-size: 24px; 
+                padding: 15px; 
+                max-width: 100%; 
+              }
+              button { 
+                font-size: 32px; 
+                padding: 15px 30px; 
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${testNames[testNumber].name}</h1>
+          <div class="timer">Залишилося часу: ${minutes} хв ${seconds} с</div>
+          <div class="progress">${progress}</div>
+          ${q.picture ? `<img src="${q.picture}" alt="Question Image" onerror="this.src='/images/placeholder.png'">` : ''}
+          <div class="question">${q.text}</div>
+          <form id="questionForm" method="POST" action="/test/save-answer">
+            <input type="hidden" name="index" value="${index}">
+            <div class="options" id="options">
+              ${q.options && q.options.length > 0 ? q.options.map((option, i) => {
+                if (q.type === 'ordering') {
+                  const userAnswer = answers[index] || q.options;
+                  const idx = userAnswer.indexOf(option);
+                  return `<div class="option ordering" draggable="true" data-index="${i}" style="order: ${idx}">${option}</div>`;
                 } else {
-                  option.classList.remove('selected');
+                  const isSelected = answers[index] && answers[index].includes(String(option));
+                  return `
+                    <label class="option${isSelected ? ' selected' : ''}">
+                      <input type="${q.type === 'multiple' ? 'checkbox' : 'radio'}" name="answer" value="${option}" style="display: none;" ${isSelected ? 'checked' : ''}>
+                      ${option}
+                    </label>
+                  `;
                 }
-              }
-            });
-          });
-
-          const orderingOptions = optionsDiv.querySelectorAll('.option.ordering');
-          let draggedItem = null;
-          orderingOptions.forEach(item => {
-            item.addEventListener('dragstart', () => {
-              draggedItem = item;
-              setTimeout(() => item.style.display = 'none', 0);
-            });
-            item.addEventListener('dragend', () => {
-              setTimeout(() => {
-                draggedItem.style.display = 'block';
-                draggedItem = null;
-              }, 0);
-            });
-            item.addEventListener('dragover', e => e.preventDefault());
-            item.addEventListener('dragenter', e => e.preventDefault());
-            item.addEventListener('drop', () => {
-              const allItems = Array.from(orderingOptions);
-              const draggedIndex = parseInt(draggedItem.dataset.index);
-              const droppedIndex = parseInt(item.dataset.index);
-              const newOrder = allItems.map(opt => parseInt(opt.dataset.index));
-              newOrder.splice(draggedIndex, 1);
-              newOrder.splice(droppedIndex, 0, draggedIndex);
-              allItems.forEach((opt, idx) => {
-                opt.style.order = newOrder.indexOf(parseInt(opt.dataset.index));
+              }).join('') : `<input type="text" name="answer" value="${answers[index] || ''}" placeholder="Введіть відповідь">`}
+            </div>
+            <div class="buttons">
+              <button type="button" id="prevBtn" onclick="window.location.href='/test/question?index=${index - 1}'" ${index === 0 ? 'disabled' : ''}>Назад</button>
+              <button type="submit" id="nextBtn">${index === questions.length - 1 ? 'Завершити тест' : 'Вперед'}</button>
+            </div>
+          </form>
+          <button onclick="window.location.href='/logout'">Вийти</button>
+          <script>
+            const optionsDiv = document.getElementById('options');
+            const options = optionsDiv.querySelectorAll('.option:not(.ordering)');
+            options.forEach(option => {
+              option.addEventListener('click', () => {
+                const input = option.querySelector('input');
+                if (input.type === 'radio') {
+                  options.forEach(opt => {
+                    opt.classList.remove('selected');
+                    opt.querySelector('input').checked = false;
+                  });
+                  input.checked = true;
+                  option.classList.add('selected');
+                } else if (input.type === 'checkbox') {
+                  input.checked = !input.checked;
+                  if (input.checked) {
+                    option.classList.add('selected');
+                  } else {
+                    option.classList.remove('selected');
+                  }
+                }
               });
             });
-          });
-        </script>
-      </body>
-    </html>
-  `);
+
+            const orderingOptions = optionsDiv.querySelectorAll('.option.ordering');
+            let draggedItem = null;
+            orderingOptions.forEach(item => {
+              item.addEventListener('dragstart', () => {
+                draggedItem = item;
+                setTimeout(() => item.style.display = 'none', 0);
+              });
+              item.addEventListener('dragend', () => {
+                setTimeout(() => {
+                  draggedItem.style.display = 'block';
+                  draggedItem = null;
+                }, 0);
+              });
+              item.addEventListener('dragover', e => e.preventDefault());
+              item.addEventListener('dragenter', e => e.preventDefault());
+              item.addEventListener('drop', () => {
+                const allItems = Array.from(orderingOptions);
+                const draggedIndex = parseInt(draggedItem.dataset.index);
+                const droppedIndex = parseInt(item.dataset.index);
+                const newOrder = allItems.map(opt => parseInt(opt.dataset.index));
+                newOrder.splice(draggedIndex, 1);
+                newOrder.splice(droppedIndex, 0, draggedIndex);
+                allItems.forEach((opt, idx) => {
+                  opt.style.order = newOrder.indexOf(parseInt(opt.dataset.index));
+                });
+              });
+            });
+          </script>
+        </body>
+      </html>
+    `);
+    logger.info(`GET /test/question completed, took ${Date.now() - startTime}ms`);
+  } catch (err) {
+    logger.error(`Error in GET /test/question, took ${Date.now() - startTime}ms:`, err);
+    res.status(500).send('Помилка сервера');
+  }
 });
 
 // Сохранение ответа
 app.post('/test/save-answer', checkAuth, async (req, res) => {
-  const userTest = await getUserTest(req.user);
-  if (!userTest) return res.status(400).send('Тест не розпочато');
+  const startTime = Date.now();
+  logger.info('Handling POST /test/save-answer');
 
-  const { index, answer } = req.body;
-  const idx = parseInt(index);
-  const { questions, answers, testNumber, startTime } = userTest;
+  try {
+    const userTest = await getUserTest(req.user);
+    if (!userTest) {
+      logger.warn(`Test not started for user ${req.user}`);
+      return res.status(400).send('Тест не розпочато');
+    }
 
-  if (idx < 0 || idx >= questions.length) {
-    return res.status(400).send('Невірний номер питання');
-  }
+    const { index, answer } = req.body;
+    const idx = parseInt(index);
+    const { questions, answers, testNumber, startTime: testStartTime } = userTest;
 
-  const timeRemaining = testNames[testNumber].timeLimit * 1000 - (Date.now() - startTime);
-  if (timeRemaining <= 0) {
-    return res.redirect('/test/finish');
-  }
+    if (idx < 0 || idx >= questions.length) {
+      logger.warn(`Invalid question index ${idx} for user ${req.user}`);
+      return res.status(400).send('Невірний номер питання');
+    }
 
-  const q = questions[idx];
-  if (q.type === 'multiple') {
-    answers[idx] = Array.isArray(answer) ? answer : [answer].filter(Boolean);
-  } else if (q.type === 'ordering') {
-    const orderingOptions = req.body.answer || q.options;
-    answers[idx] = orderingOptions;
-  } else {
-    answers[idx] = answer;
-  }
+    const timeRemaining = testNames[testNumber].timeLimit * 1000 - (Date.now() - testStartTime);
+    if (timeRemaining <= 0) {
+      logger.info(`Time limit exceeded for user ${req.user}, redirecting to finish`);
+      return res.redirect('/test/finish');
+    }
 
-  userTest.answers = answers;
-  await setUserTest(req.user, userTest);
+    const q = questions[idx];
+    if (q.type === 'multiple') {
+      answers[idx] = Array.isArray(answer) ? answer : [answer].filter(Boolean);
+    } else if (q.type === 'ordering') {
+      const orderingOptions = req.body.answer || q.options;
+      answers[idx] = orderingOptions;
+    } else {
+      answers[idx] = answer;
+    }
 
-  if (idx === questions.length - 1) {
-    return res.redirect('/test/finish');
-  } else {
-    return res.redirect(`/test/question?index=${idx + 1}`);
+    userTest.answers = answers;
+    await setUserTest(req.user, userTest);
+
+    if (idx === questions.length - 1) {
+      logger.info(`Last question answered by user ${req.user}, redirecting to finish, took ${Date.now() - startTime}ms`);
+      return res.redirect('/test/finish');
+    } else {
+      logger.info(`Answer saved for question ${idx} by user ${req.user}, redirecting to next, took ${Date.now() - startTime}ms`);
+      return res.redirect(`/test/question?index=${idx + 1}`);
+    }
+  } catch (err) {
+    logger.error(`Error in POST /test/save-answer, took ${Date.now() - startTime}ms:`, err);
+    res.status(500).send('Помилка сервера');
   }
 });
 
 // Завершение теста
 app.get('/test/finish', checkAuth, async (req, res) => {
-  const userTest = await getUserTest(req.user);
-  if (!userTest) return res.status(400).send('Тест не розпочато');
+  const startTime = Date.now();
+  logger.info('Handling GET /test/finish');
 
-  const { testNumber, questions, answers, startTime, suspiciousBehavior } = userTest;
-  const endTime = Date.now();
-
-  let score = 0;
-  let totalPoints = 0;
-  questions.forEach((q, idx) => {
-    const userAnswer = answers[idx];
-    let questionScore = 0;
-    if (!q.options || q.options.length === 0) {
-      if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
-        questionScore = q.points;
-      }
-    } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
-      const correctAnswers = q.correctAnswers.map(String);
-      const userAnswers = userAnswer.map(String);
-      if (correctAnswers.length === userAnswers.length &&
-          correctAnswers.every(val => userAnswers.includes(val)) &&
-          userAnswers.every(val => correctAnswers.includes(val))) {
-        questionScore = q.points;
-      }
-    } else if (q.type === 'ordering' && userAnswer && userAnswer.length > 0) {
-      const correctAnswers = q.correctAnswers.map(String);
-      const userAnswers = userAnswer.map(String);
-      if (correctAnswers.length === userAnswers.length &&
-          correctAnswers.every((val, idx) => val === userAnswers[idx])) {
-        questionScore = q.points;
-      }
-    } else if (q.type === 'single' && userAnswer) {
-      if (String(userAnswer).trim() === String(q.correctAnswers[0]).trim()) {
-        questionScore = q.points;
-      }
+  try {
+    const userTest = await getUserTest(req.user);
+    if (!userTest) {
+      logger.warn(`Test not started for user ${req.user}`);
+      return res.status(400).send('Тест не розпочато');
     }
-    score += questionScore;
-    totalPoints += q.points;
-  });
 
-  await saveResult(req.user, testNumber, score, totalPoints, startTime, endTime, suspiciousBehavior, answers, questions);
-  await deleteUserTest(req.user);
+    const { testNumber, questions, answers, startTime: testStartTime, suspiciousBehavior } = userTest;
+    const endTime = Date.now();
 
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Тест завершено</title>
-        <style>
-          body { 
-            font-size: 32px; 
-            margin: 20px; 
-            text-align: center; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            min-height: 100vh; 
-          }
-          h1 { 
-            margin-bottom: 20px; 
-          }
-          p { 
-            margin: 10px 0; 
-          }
-          button { 
-            font-size: 32px; 
-            padding: 10px 20px; 
-            margin: 20px; 
-            width: 100%; 
-            max-width: 300px; 
-            border: none; 
-            border-radius: 5px; 
-            background-color: #007bff; 
-            color: white; 
-            cursor: pointer; 
-          }
-          button:hover { 
-            background-color: #0056b3; 
-          }
-          @media (max-width: 1024px) {
+    let score = 0;
+    let totalPoints = 0;
+    questions.forEach((q, idx) => {
+      const userAnswer = answers[idx];
+      let questionScore = 0;
+      if (!q.options || q.options.length === 0) {
+        if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
+          questionScore = q.points;
+        }
+      } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
+        const correctAnswers = q.correctAnswers.map(String);
+        const userAnswers = userAnswer.map(String);
+        if (correctAnswers.length === userAnswers.length &&
+            correctAnswers.every(val => userAnswers.includes(val)) &&
+            userAnswers.every(val => correctAnswers.includes(val))) {
+          questionScore = q.points;
+        }
+      } else if (q.type === 'ordering' && userAnswer && userAnswer.length > 0) {
+        const correctAnswers = q.correctAnswers.map(String);
+        const userAnswers = userAnswer.map(String);
+        if (correctAnswers.length === userAnswers.length &&
+            correctAnswers.every((val, idx) => val === userAnswers[idx])) {
+          questionScore = q.points;
+        }
+      } else if (q.type === 'single' && userAnswer) {
+        if (String(userAnswer).trim() === String(q.correctAnswers[0]).trim()) {
+          questionScore = q.points;
+        }
+      }
+      score += questionScore;
+      totalPoints += q.points;
+    });
+
+    await saveResult(req.user, testNumber, score, totalPoints, testStartTime, endTime, suspiciousBehavior, answers, questions);
+    await deleteUserTest(req.user);
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Тест завершено</title>
+          <style>
             body { 
-              font-size: 48px; 
-              margin: 30px; 
+              font-size: 32px; 
+              margin: 20px; 
+              text-align: center; 
+              display: flex; 
+              flex-direction: column; 
+              align-items: center; 
+              min-height: 100vh; 
             }
             h1 { 
-              font-size: 64px; 
-              margin-bottom: 30px; 
+              margin-bottom: 20px; 
             }
             p { 
-              font-size: 48px; 
+              margin: 10px 0; 
             }
             button { 
-              font-size: 48px; 
-              padding: 15px 30px; 
-              margin: 30px; 
-              max-width: 100%; 
+              font-size: 32px; 
+              padding: 10px 20px; 
+              margin: 20px; 
+              width: 100%; 
+              max-width: 300px; 
+              border: none; 
+              border-radius: 5px; 
+              background-color: #007bff; 
+              color: white; 
+              cursor: pointer; 
             }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Тест завершено</h1>
-        <p>Ваш результат: ${score} / ${totalPoints}</p>
-        <p>Тривалість: ${formatDuration(Math.round((endTime - startTime) / 1000))}</p>
-        <p>Підозріла активність: ${Math.round((suspiciousBehavior / (Math.round((endTime - startTime) / 1000) || 1)) * 100)}%</p>
-        <button onclick="window.location.href='/select-test'">Повернутися до вибору тесту</button>
-        <button onclick="window.location.href='/logout'">Вийти</button>
-      </body>
-    </html>
-  `);
+            button:hover { 
+              background-color: #0056b3; 
+            }
+            @media (max-width: 1024px) {
+              body { 
+                font-size: 48px; 
+                margin: 30px; 
+              }
+              h1 { 
+                font-size: 64px; 
+                margin-bottom: 30px; 
+              }
+              p { 
+                font-size: 48px; 
+              }
+              button { 
+                font-size: 48px; 
+                padding: 15px 30px; 
+                margin: 30px; 
+                max-width: 100%; 
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Тест завершено</h1>
+          <p>Ваш результат: ${score} / ${totalPoints}</p>
+          <p>Тривалість: ${formatDuration(Math.round((endTime - testStartTime) / 1000))}</p>
+          <p>Підозріла активність: ${Math.round((suspiciousBehavior / (Math.round((endTime - testStartTime) / 1000) || 1)) * 100)}%</p>
+          <button onclick="window.location.href='/select-test'">Повернутися до вибору тесту</button>
+          <button onclick="window.location.href='/logout'">Вийти</button>
+        </body>
+      </html>
+    `);
+    logger.info(`GET /test/finish completed for user ${req.user}, took ${Date.now() - startTime}ms`);
+  } catch (err) {
+    logger.error(`Error in GET /test/finish, took ${Date.now() - startTime}ms:`, err);
+    res.status(500).send('Помилка сервера');
+  }
 });
 
 // Маршрут админ-панели
 app.get('/admin', checkAdmin, async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling GET /admin');
+
   try {
-    const results = await redisClient.lrange('test_results', 0, -1);
+    let results = [];
+    if (redisAvailable) {
+      results = await redis.lrange('test_results', 0, -1);
+    }
     const parsedResults = results.map(r => JSON.parse(r));
 
     const questionsByTest = {};
@@ -1233,35 +1332,49 @@ app.get('/admin', checkAdmin, async (req, res) => {
         </body>
       </html>
     `);
+    logger.info(`GET /admin completed, took ${Date.now() - startTime}ms`);
   } catch (error) {
-    logger.error('Ошибка в /admin:', error.stack);
+    logger.error(`Error in GET /admin, took ${Date.now() - startTime}ms:`, error.stack);
     res.status(500).send('Помилка сервера');
   }
 });
 
 app.post('/admin/delete-results', checkAdmin, async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling POST /admin/delete-results');
+
   try {
-    await redisClient.del('test_results');
+    if (redisAvailable) {
+      await redis.del('test_results');
+    }
+    logger.info(`Test results deleted, took ${Date.now() - startTime}ms`);
     res.json({ success: true, message: 'Результати тестів успішно видалені' });
   } catch (error) {
-    logger.error('Ошибка в /admin/delete-results:', error.stack);
+    logger.error(`Error in POST /admin/delete-results, took ${Date.now() - startTime}ms:`, error.stack);
     res.status(500).json({ success: false, message: 'Помилка при видаленні результатів' });
   }
 });
 
 app.post('/admin/toggle-camera', checkAdmin, async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling POST /admin/toggle-camera');
+
   try {
     const currentMode = await getCameraMode();
     await setCameraMode(!currentMode);
+    logger.info(`Camera mode toggled to ${!currentMode}, took ${Date.now() - startTime}ms`);
     res.json({ success: true, message: `Камера ${!currentMode ? 'увімкнена' : 'вимкнена'}` });
   } catch (error) {
-    logger.error('Ошибка в /admin/toggle-camera:', error.stack);
+    logger.error(`Error in POST /admin/toggle-camera, took ${Date.now() - startTime}ms:`, error.stack);
     res.status(500).json({ success: false, message: 'Помилка при зміні стану камери' });
   }
 });
 
 // Страница создания теста
 app.get('/admin/create-test', checkAdmin, (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling GET /admin/create-test');
+
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -1292,15 +1405,20 @@ app.get('/admin/create-test', checkAdmin, (req, res) => {
       </body>
     </html>
   `);
+  logger.info(`GET /admin/create-test completed, took ${Date.now() - startTime}ms`);
 });
 
 // Обработка создания теста
 app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling POST /admin/create-test');
+
   try {
     const { testName, timeLimit } = req.body;
     const file = req.file;
 
     if (!testName || !timeLimit || !file) {
+      logger.warn('Missing required fields for test creation');
       return res.status(400).send('Усі поля обов’язкові');
     }
 
@@ -1316,18 +1434,24 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
     }
 
     testNames[newTestNumber] = { name: testName, timeLimit: parseInt(timeLimit), questionsFile: questionsFileName };
-    await redisClient.set('testNames', JSON.stringify(testNames));
+    if (redisAvailable) {
+      await redis.set('testNames', JSON.stringify(testNames));
+    }
     fs.unlinkSync(file.path);
 
+    logger.info(`Test ${newTestNumber} created, took ${Date.now() - startTime}ms`);
     res.redirect('/admin');
   } catch (error) {
-    logger.error('Ошибка при создании теста:', error.stack);
+    logger.error(`Error in POST /admin/create-test, took ${Date.now() - startTime}ms:`, error.stack);
     res.status(500).send('Помилка сервера');
   }
 });
 
 // Страница редактирования тестов
 app.get('/admin/edit-tests', checkAdmin, (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling GET /admin/edit-tests');
+
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -1402,42 +1526,63 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
       </body>
     </html>
   `);
+  logger.info(`GET /admin/edit-tests completed, took ${Date.now() - startTime}ms`);
 });
 
 app.post('/admin/update-test', checkAdmin, async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling POST /admin/update-test');
+
   try {
     const { testNum, name, timeLimit, questionsFile } = req.body;
     if (!testNames[testNum]) {
+      logger.warn(`Test ${testNum} not found`);
       return res.status(404).json({ success: false, message: 'Тест не знайдено' });
     }
     testNames[testNum] = { name, timeLimit: parseInt(timeLimit), questionsFile };
-    await redisClient.set('testNames', JSON.stringify(testNames));
+    if (redisAvailable) {
+      await redis.set('testNames', JSON.stringify(testNames));
+    }
+    logger.info(`Test ${testNum} updated, took ${Date.now() - startTime}ms`);
     res.json({ success: true, message: 'Тест успішно оновлено' });
   } catch (error) {
-    logger.error('Ошибка в /admin/update-test:', error.stack);
+    logger.error(`Error in POST /admin/update-test, took ${Date.now() - startTime}ms:`, error.stack);
     res.status(500).json({ success: false, message: 'Помилка при оновленні тесту' });
   }
 });
 
 app.post('/admin/delete-test', checkAdmin, async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling POST /admin/delete-test');
+
   try {
     const { testNum } = req.body;
     if (!testNames[testNum]) {
+      logger.warn(`Test ${testNum} not found`);
       return res.status(404).json({ success: false, message: 'Тест не знайдено' });
     }
     delete testNames[testNum];
-    await redisClient.set('testNames', JSON.stringify(testNames));
+    if (redisAvailable) {
+      await redis.set('testNames', JSON.stringify(testNames));
+    }
+    logger.info(`Test ${testNum} deleted, took ${Date.now() - startTime}ms`);
     res.json({ success: true, message: 'Тест успішно видалено' });
   } catch (error) {
-    logger.error('Ошибка в /admin/delete-test:', error.stack);
+    logger.error(`Error in POST /admin/delete-test, took ${Date.now() - startTime}ms:`, error.stack);
     res.status(500).json({ success: false, message: 'Помилка при видаленні тесту' });
   }
 });
 
 // Перегляд результатів тестів
 app.get('/admin/view-results', checkAdmin, async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling GET /admin/view-results');
+
   try {
-    const results = await redisClient.lrange('test_results', 0, -1);
+    let results = [];
+    if (redisAvailable) {
+      results = await redis.lrange('test_results', 0, -1);
+    }
     const parsedResults = results.map(r => JSON.parse(r));
 
     const questionsByTest = {};
@@ -1526,17 +1671,22 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
         </body>
       </html>
     `);
+    logger.info(`GET /admin/view-results completed, took ${Date.now() - startTime}ms`);
   } catch (error) {
-    logger.error('Ошибка в /admin/view-results:', error.stack);
+    logger.error(`Error in GET /admin/view-results, took ${Date.now() - startTime}ms:`, error.stack);
     res.status(500).send('Помилка сервера');
   }
 });
 
 // Выход
 app.get('/logout', (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling GET /logout');
+
   res.clearCookie('auth');
   res.clearCookie('savedPassword');
   res.redirect('/');
+  logger.info(`GET /logout completed, took ${Date.now() - startTime}ms`);
 });
 
 // Обработка ошибок 404
@@ -1603,7 +1753,7 @@ app.use((err, req, res, next) => {
 process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM, shutting down gracefully...');
   try {
-    await redisClient.quit();
+    await redis.quit();
     logger.info('Redis connection closed');
   } catch (err) {
     logger.error('Error closing Redis connection:', err.stack);
@@ -1614,7 +1764,7 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   logger.info('Received SIGINT, shutting down gracefully...');
   try {
-    await redisClient.quit();
+    await redis.quit();
     logger.info('Redis connection closed');
   } catch (err) {
     logger.error('Error closing Redis connection:', err.stack);
@@ -1628,9 +1778,34 @@ process.on('uncaughtException', (err) => {
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason.stack || reason);
   process.exit(1);
-});
-
-// Экспорт приложения для Vercel
-module.exports = app;
+  });
+  
+  // Запуск сервера
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, async () => {
+  logger.info(Server is running on port ${PORT});
+  try {
+  await initializeServer();
+  if (!isInitialized) {
+  logger.error('Server failed to initialize after startup');
+  process.exit(1);
+  }
+  } catch (err) {
+  logger.error('Error during server startup:', err.stack);
+  process.exit(1);
+  }
+  });
+  
+  // Периодическая проверка подключения к Redis
+  setInterval(async () => {
+  try {
+  await ensureRedisConnected();
+  } catch (err) {
+  logger.error('Periodic Redis check failed:', err.message);
+  }
+  }, 30000); // Проверка каждые 30 секунд
+  
+  // Экспорт приложения для тестирования (если требуется)
+  module.exports = app;
