@@ -20,9 +20,9 @@ const app = express();
 // Настройка Redis
 let redisAvailable = false;
 const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
-  connectTimeout: 10000, // 10 секунд
+  connectTimeout: 10000,
   retryStrategy(times) {
-    return Math.min(times * 50, 2000); // Повторные попытки с увеличением задержки
+    return Math.min(times * 50, 2000);
   },
 });
 
@@ -417,6 +417,10 @@ const checkInitialization = (req, res, next) => {
 
 // Применяем middleware ко всем маршрутам
 app.use(checkInitialization);
+
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end(); // 204 No Content
+});
 
 // Главная страница (вход)
 app.get('/', async (req, res) => {
