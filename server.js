@@ -1783,20 +1783,20 @@ process.on('unhandledRejection', (reason, promise) => {
   });
   
   // Запуск сервера
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, async () => {
-  logger.info(Server is running on port ${PORT});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, async () => {
+  logger.info(`Server is running on ${PORT}`); // Используем шаблонную строку
   try {
-  await initializeServer();
-  if (!isInitialized) {
-  logger.error('Server failed to initialize after startup');
-  process.exit(1);
-  }
+    await initializeServer();
+    if (!isInitialized) {
+      logger.error('Server failed to initialize after startup');
+      process.exit(1);
+    }
   } catch (err) {
-  logger.error('Error during server startup:', err.stack);
-  process.exit(1);
+    logger.error('Error during server startup:', err.stack);
+    process.exit(1);
   }
-  });
+});
   
   // Периодическая проверка подключения к Redis
   setInterval(async () => {

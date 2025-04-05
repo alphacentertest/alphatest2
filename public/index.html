@@ -43,7 +43,7 @@
         box-sizing: border-box; 
       }
       #password { 
-        background-color: #d3d3d3; /* Серый фон */
+        background-color: #d3d3d3; 
       }
       button { 
         font-size: 16px; 
@@ -83,7 +83,7 @@
       <form action="/login" method="POST">
         <label>Пароль:</label>
         <div class="password-container">
-          <input type="password" id="password" name="password" required>
+          <input type="password" id="password" name="password" value="${savedPassword}" required>
           <span class="eye-icon" onclick="togglePassword()">👁️</span>
         </div>
         <label><input type="checkbox" name="rememberMe"> Запам'ятати пароль</label>
