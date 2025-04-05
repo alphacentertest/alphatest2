@@ -37,4 +37,3 @@ const browserTestEnv: TestEnv = {
 export function getTestEnv(): TestEnv {
   return global['nodeTestEnv'] || browserTestEnv
 }
-

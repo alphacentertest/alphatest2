@@ -46,8 +46,8 @@
       container.innerHTML = '';
 
       container.innerHTML += `<p>Питання ${index + 1} із ${questions.length}</p>`;
-      const questionText = q.question.richText ? 
-        q.question.richText.map(rt => `<span style="font-weight: ${rt.font.bold ? 'bold' : 'normal'}; font-style: ${rt.font.italic ? 'italic' : 'normal'}">${rt.text}</span>`).join('') : 
+      const questionText = q.question.richText ?
+        q.question.richText.map(rt => `<span style="font-weight: ${rt.font.bold ? 'bold' : 'normal'}; font-style: ${rt.font.italic ? 'italic' : 'normal'}">${rt.text}</span>`).join('') :
         q.question;
       container.innerHTML += `<h2>${questionText}</h2>`;
 
@@ -118,7 +118,7 @@
         const result = await response.json();
         console.log('Result from server:', result);
         if (!response.ok) throw new Error(result.error || 'Помилка при отриманні результатів');
-        document.getElementById('questionContainer').innerHTML = 
+        document.getElementById('questionContainer').innerHTML =
           `Тест завершено! Ваш результат: ${result.score} із ${result.totalPoints}`;
         document.querySelector('.buttons').style.display = 'none';
       } catch (error) {

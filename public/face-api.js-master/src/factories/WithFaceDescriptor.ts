@@ -12,4 +12,3 @@ export function extendWithFaceDescriptor<
   const extension = { descriptor }
   return Object.assign({}, sourceObj, extension)
 }
-

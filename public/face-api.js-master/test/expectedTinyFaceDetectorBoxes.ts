@@ -9,4 +9,3 @@ export const expectedTinyFaceDetectorBoxes: IRect[] = sortBoxes([
   { x: 430, y: 183, width: 162, height: 143 },
   { x: 54, y: 33, width: 134, height: 114 }
 ])
-

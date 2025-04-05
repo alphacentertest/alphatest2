@@ -198,4 +198,3 @@ describeWithBackend('faceExpressionNet', () => {
   })
 
 })
-

@@ -276,4 +276,3 @@ describeWithBackend('faceLandmark68Net', () => {
   })
 
 })
-

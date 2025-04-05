@@ -49,4 +49,3 @@ describeWithBackend('faceLandmark68Net, uncompressed', () => {
   })
 
 })
-

@@ -50,4 +50,3 @@ describeWithBackend('faceLandmark68TinyNet, uncompressed', () => {
   })
 
 })
-

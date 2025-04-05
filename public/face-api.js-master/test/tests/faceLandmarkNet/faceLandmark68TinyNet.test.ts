@@ -271,4 +271,3 @@ describeWithBackend('faceLandmark68TinyNet', () => {
   })
 
 })
-
