@@ -17,6 +17,10 @@ require('dotenv').config();
 // Инициализация приложения
 const app = express();
 
+app.get('/node-version', (req, res) => {
+  res.send(`Node.js version: ${process.version}`);
+});
+
 // Настройка Redis
 let redisReady = false; // Глобальная переменная для отслеживания готовности Redis
 const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
@@ -407,49 +411,47 @@ const checkAdmin = (req, res, next) => {
 // Инициализация сервера
 const initializeServer = async () => {
   const startTime = Date.now();
-  logger.info('Starting server initialization');
-
   try {
-    // Проверяем статус Redis перед попыткой подключения
-    if (redis.status === 'ready') {
-      logger.info('Redis is already connected');
-      redisReady = true;
-    } else if (redis.status !== 'connecting' && redis.status !== 'connect') {
-      logger.info('Connecting to Redis...');
-      await redis.connect();
-      redisReady = true;
-      logger.info('Redis connected');
-    } else {
-      logger.info('Redis is already connecting, waiting for connection...');
-      await new Promise((resolve) => {
-        redis.once('ready', () => {
-          redisReady = true;
-          logger.info('Redis connected');
-          resolve();
-        });
+    await new Promise((resolve) => {
+      redis.once('ready', () => {
+        redisReady = true;
+        logger.info('Redis is ready to accept commands');
+        resolve();
       });
+    });
+
+    const usersFromBlob = await loadUsers();
+    if (usersFromBlob.length === 0) {
+      logger.warn('No users loaded from Blob Storage. Admin functionality may be limited.');
+    } else {
+      users = usersFromBlob;
+      for (const user of users) {
+        const hashedPassword = await bcrypt.hash(user.password, 10);
+        user.password = hashedPassword;
+      }
     }
 
-    await loadUsers();
-    logger.info('Users loaded successfully');
+    const questionPromises = Object.keys(testNames).map(async (key) => {
+      const test = testNames[key];
+      test.questions = await loadQuestions(test.questionsFile);
+      if (test.questions.length === 0) {
+        logger.warn(`No questions loaded for test ${key}, removing from testNames`);
+        delete testNames[key];
+      }
+    });
+
+    await Promise.all(questionPromises);
+
+    if (Object.keys(testNames).length === 0) {
+      throw new Error('No tests available after initialization');
+    }
 
     isInitialized = true;
-    logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
   } catch (error) {
-    initializationError = error;
-    logger.error(`Failed to initialize server, took ${Date.now() - startTime}ms:`, error.stack);
+    logger.error(`Failed to initialize server, took ${Date.now() - startTime}ms:`, error.message, error.stack);
     throw error;
   }
 };
-
-// Обработка favicon.ico и favicon.png
-app.get('/favicon.ico', (req, res) => {
-  res.status(204).end();
-});
-
-app.get('/favicon.png', (req, res) => {
-  res.status(204).end();
-});
 
 // Главная страница (вход)
 app.get('/', async (req, res) => {
@@ -1800,7 +1802,6 @@ const startServer = async () => {
       logger.info(`Server running on port ${PORT}`);
     });
 
-    // Обработка завершения работы сервера
     process.on('SIGTERM', async () => {
       logger.info('Received SIGTERM, shutting down gracefully...');
       try {
@@ -1834,52 +1835,13 @@ const startServer = async () => {
     });
 
   } catch (error) {
-    logger.error('Failed to start server:', error.stack);
+    if (logger) {
+      logger.error('Failed to start server:', error.stack);
+    }
     process.exit(1);
   }
 };
 
-// Обработка завершения работы сервера
-process.on('SIGTERM', async () => {
-logger.info('Received SIGTERM, shutting down gracefully...');
-try {
-await redis.quit(); // Закрываем соединение с Redis
-logger.info('Redis connection closed');
-} catch (err) {
-logger.error('Error closing Redis connection:', err.stack);
-}
-process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-logger.info('Received SIGINT, shutting down gracefully...');
-try {
-await redis.quit(); // Закрываем соединение с Redis
-logger.info('Redis connection closed');
-} catch (err) {
-logger.error('Error closing Redis connection:', err.stack);
-}
-process.exit(0);
-});
-
-// Обработка непредвиденных ошибок
-process.on('uncaughtException', (err) => {
-logger.error('Uncaught Exception:', err.stack);
-process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-logger.error('Unhandled Rejection at:', promise, 'reason:', reason.stack || reason);
-process.exit(1);
-});
-
-} catch (error) {
-logger.error('Failed to start server:', error.stack);
-process.exit(1);
-}
-};
-
-// Запуск сервера
 startServer();
 
-module.exports = app; // Экспорт приложения для возможного использования в тестах или других модулях
+module.exports = app;
