@@ -3,42 +3,55 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const { createClient } = require('redis');
-const fs = require('fs');
 const cors = require('cors');
+const { list, download } = require('@vercel/blob');
 
 const app = express();
 
 app.use(cors());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(cookieParser());
 
 let validPasswords = {};
 let isInitialized = false;
 let initializationError = null;
 let testNames = {
-  '1': { name: 'Тест 1', timeLimit: 3600 }, // По умолчанию 1 час (3600 секунд)
-  '2': { name: 'Тест 2', timeLimit: 3600 }  // По умолчанию 1 час
-}; // Храним названия и время тестов
+  '1': { name: 'Тест 1', timeLimit: 3600 },
+  '2': { name: 'Тест 2', timeLimit: 3600 }
+};
 
-const loadUsers = async () => {
+const redisClient = createClient({
+  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808',
+  socket: {
+    connectTimeout: 10000,
+    reconnectStrategy: (retries) => Math.min(retries * 500, 3000)
+  }
+});
+
+redisClient.on('error', (err) => console.error('Redis Client Error:', err));
+redisClient.on('connect', () => console.log('Redis connected'));
+redisClient.on('reconnecting', () => console.log('Redis reconnecting'));
+
+const loadUsersFromExcel = async () => {
   try {
-    const filePath = path.join(__dirname, 'users.xlsx');
-    console.log('Attempting to load users from:', filePath);
+    console.log('Loading users from Blob Storage...');
+    const { blobs } = await list({ token: process.env.BLOB_READ_WRITE_TOKEN });
+    const excelBlob = blobs.find(blob => blob.pathname === 'users.xlsx');
+    if (!excelBlob) throw new Error('Excel file users.xlsx not found in Blob Storage');
 
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File users.xlsx not found at path: ${filePath}`);
-    }
-    console.log('File users.xlsx exists at:', filePath);
+    const file = await download({ url: excelBlob.url, token: process.env.BLOB_READ_WRITE_TOKEN });
+    const arrayBuffer = await file.arrayBuffer();
 
     const workbook = new ExcelJS.Workbook();
-    console.log('Reading users.xlsx file...');
-    await workbook.xlsx.readFile(filePath);
-    console.log('File read successfully');
+    await workbook.xlsx.load(arrayBuffer);
 
     let sheet = workbook.getWorksheet('Users');
     if (!sheet) {
       console.warn('Worksheet "Users" not found, trying "Sheet1"');
       sheet = workbook.getWorksheet('Sheet1');
       if (!sheet) {
-        console.error('Worksheet "Sheet1" not found in users.xlsx');
         throw new Error('Ни один из листов ("Users" или "Sheet1") не найден');
       }
     }
@@ -55,25 +68,28 @@ const loadUsers = async () => {
       }
     });
     if (Object.keys(users).length === 0) {
-      console.error('No valid users found in users.xlsx');
       throw new Error('Не знайдено користувачів у файлі');
     }
     console.log('Loaded users from Excel:', users);
     return users;
   } catch (error) {
-    console.error('Error loading users from users.xlsx:', error.message, error.stack);
+    console.error('Error loading users from Blob Storage:', error.message, error.stack);
     throw error;
   }
 };
 
 const loadQuestions = async (testNumber) => {
   try {
-    const filePath = path.join(__dirname, `questions${testNumber}.xlsx`);
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File questions${testNumber}.xlsx not found at path: ${filePath}`);
-    }
+    console.log(`Loading questions for test ${testNumber} from Blob Storage...`);
+    const { blobs } = await list({ token: process.env.BLOB_READ_WRITE_TOKEN });
+    const excelBlob = blobs.find(blob => blob.pathname === `questions${testNumber}.xlsx`);
+    if (!excelBlob) throw new Error(`File questions${testNumber}.xlsx not found in Blob Storage`);
+
+    const file = await download({ url: excelBlob.url, token: process.env.BLOB_READ_WRITE_TOKEN });
+    const arrayBuffer = await file.arrayBuffer();
+
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.load(arrayBuffer);
     const jsonData = [];
     const sheet = workbook.getWorksheet('Questions');
 
@@ -94,6 +110,7 @@ const loadQuestions = async (testNumber) => {
         });
       }
     });
+    console.log(`Loaded questions for test ${testNumber}:`, jsonData);
     return jsonData;
   } catch (error) {
     console.error(`Ошибка в loadQuestions (test ${testNumber}):`, error.stack);
@@ -111,23 +128,6 @@ const ensureInitialized = (req, res, next) => {
   next();
 };
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(cookieParser());
-
-const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://default:BnB234v9OBeTLYbpIm2TWGXjnu8hqXO3@redis-13808.c1.us-west-2-2.ec2.redns.redis-cloud.com:13808',
-  socket: {
-    connectTimeout: 10000,
-    reconnectStrategy: (retries) => Math.min(retries * 500, 3000)
-  }
-});
-
-redisClient.on('error', (err) => console.error('Redis Client Error:', err));
-redisClient.on('connect', () => console.log('Redis connected'));
-redisClient.on('reconnecting', () => console.log('Redis reconnecting'));
-
 const initializeServer = async () => {
   let attempt = 1;
   const maxAttempts = 5;
@@ -135,7 +135,7 @@ const initializeServer = async () => {
   while (attempt <= maxAttempts) {
     try {
       console.log(`Starting server initialization (Attempt ${attempt} of ${maxAttempts})...`);
-      validPasswords = await loadUsers();
+      validPasswords = await loadUsersFromExcel();
       console.log('Users loaded successfully:', validPasswords);
       await redisClient.connect();
       console.log('Connected to Redis and loaded users');
@@ -170,17 +170,18 @@ app.post('/login', async (req, res) => {
     const { username, password } = req.body;
     console.log('Received login request:', { username, password });
 
-    const users = await loadUsersFromExcel();
-    console.log('Loaded users:', users);
-
-    const user = users.find(u => u.username === username && u.password === password);
-    if (!user) {
-      console.log('Login failed: Invalid username or password');
-      return res.status(401).json({ success: false, message: 'Invalid username or password' });
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Username and password are required' });
     }
 
-    console.log('Login successful for user:', username);
-    res.status(200).json({ success: true, message: 'Login successful', redirect: '/' });
+    if (validPasswords[username] && validPasswords[username] === password) {
+      console.log('Login successful for user:', username);
+      res.cookie('auth', username, { httpOnly: true });
+      return res.status(200).json({ success: true, message: 'Login successful', redirect: '/select-test' });
+    }
+
+    console.log('Login failed: Invalid username or password');
+    return res.status(401).json({ success: false, message: 'Invalid username or password' });
   } catch (err) {
     console.error('Error during login:', err);
     res.status(500).json({ success: false, message: 'Internal Server Error' });
@@ -301,7 +302,7 @@ app.get('/test', checkAuth, async (req, res) => {
       answers: {},
       currentQuestion: 0,
       startTime: Date.now(),
-      timeLimit: testNames[testNumber].timeLimit * 1000 // В миллисекундах
+      timeLimit: testNames[testNumber].timeLimit * 1000
     });
     res.redirect(`/test/question?index=0`);
   } catch (error) {
@@ -326,13 +327,11 @@ app.get('/test/question', checkAuth, (req, res) => {
   const q = questions[index];
   console.log('Rendering question:', { index, picture: q.picture, text: q.text, options: q.options });
 
-  // Прогресс для индикатора
   const progress = Array.from({ length: questions.length }, (_, i) => ({
     number: i + 1,
     answered: !!answers[i]
   }));
 
-  // Оставшееся время в секундах
   const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
   const remainingTime = Math.max(0, Math.floor(timeLimit / 1000) - elapsedTime);
   const minutes = Math.floor(remainingTime / 60).toString().padStart(2, '0');
@@ -354,7 +353,7 @@ app.get('/test/question', checkAuth, (req, res) => {
           .progress-circle.unanswered { background-color: red; color: white; }
           .progress-circle.answered { background-color: green; color: white; }
           .progress-line.answered { background-color: green; }
-          .option-box.selected { background-color: #90ee90; } /* Зеленая подсветка выбранного ответа */
+          .option-box.selected { background-color: #90ee90; }
           .button-container { position: fixed; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; }
           button { font-size: 32px; padding: 10px 20px; border: none; cursor: pointer; }
           .back-btn { background-color: red; color: white; }
@@ -811,9 +810,18 @@ app.post('/admin/edit-tests', checkAuth, checkAdmin, (req, res) => {
   }
 });
 
-app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
-  const excelFiles = fs.readdirSync(__dirname).filter(file => file.endsWith('.xlsx') && file.startsWith('questions'));
-  console.log('Available Excel files:', excelFiles);
+app.get('/admin/create-test', checkAuth, checkAdmin, async (req, res) => {
+  let excelFiles = [];
+  try {
+    const { blobs } = await list({ token: process.env.BLOB_READ_WRITE_TOKEN });
+    excelFiles = blobs
+      .filter(blob => blob.pathname.startsWith('questions') && blob.pathname.endsWith('.xlsx'))
+      .map(blob => blob.pathname);
+    console.log('Available Excel files in Blob Storage:', excelFiles);
+  } catch (error) {
+    console.error('Error listing Excel files in Blob Storage:', error);
+  }
+
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -841,7 +849,7 @@ app.get('/admin/create-test', checkAuth, checkAdmin, (req, res) => {
           <div>
             <label for="excelFile">Оберіть файл Excel з питаннями:</label>
             <select id="excelFile" name="excelFile" required>
-              ${excelFiles.map(file => `<option value="${file}">${file}</option>`).join('')}
+              ${excelFiles.length > 0 ? excelFiles.map(file => `<option value="${file}">${file}</option>`).join('') : '<option value="">Файли не знайдено</option>'}
             </select>
           </div>
           <button type="submit">Створити</button>
