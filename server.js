@@ -497,37 +497,73 @@ const initializeServer = async () => {
   const startTime = Date.now();
   try {
     logger.info('Starting server initialization...');
-    await new Promise((resolve) => {
-      redis.once('ready', () => {
-        redisReady = true;
-        logger.info('Redis is ready to accept commands');
-        resolve();
+
+    // Проверяем Redis
+    try {
+      const redisTimeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Redis connection timed out after 5 seconds')), 5000);
       });
-    });
-    logger.info('Redis connection established');
 
-    const usersFromBlob = await loadUsers();
-    logger.info(`Loaded ${usersFromBlob.length} users from Blob Storage`);
+      await Promise.race([
+        new Promise((resolve, reject) => {
+          redis.once('ready', () => {
+            redisReady = true;
+            logger.info('Redis is ready to accept commands');
+            resolve();
+          });
+          redis.on('error', (error) => {
+            logger.error('Redis connection error:', { message: error.message, stack: error.stack });
+            reject(error);
+          });
+        }),
+        redisTimeout,
+      ]);
+      logger.info('Redis connection established');
+    } catch (error) {
+      logger.warn('Failed to connect to Redis, proceeding without Redis:', { message: error.message });
+      redisReady = false; // Продолжаем без Redis
+    }
 
-    await loadTestNames();
-    logger.info('Test names loaded');
+    // Загружаем пользователей
+    let usersFromBlob = [];
+    try {
+      usersFromBlob = await loadUsers();
+      logger.info(`Loaded ${usersFromBlob.length} users from Blob Storage`);
+    } catch (error) {
+      logger.warn('Failed to load users from Blob Storage, proceeding with empty user list:', { message: error.message, stack: error.stack });
+      usersFromBlob = [];
+    }
 
-    const questionPromises = Object.keys(testNames).map(async (key) => {
-      const test = testNames[key];
-      try {
-        test.questions = await loadQuestions(test.questionsFile);
-        if (test.questions.length === 0) {
-          logger.warn(`No questions loaded for test ${key}, removing from testNames`);
+    // Загружаем тесты
+    try {
+      await loadTestNames();
+      logger.info('Test names loaded');
+    } catch (error) {
+      logger.warn('Failed to load test names, proceeding with empty test list:', { message: error.message, stack: error.stack });
+      testNames = {};
+    }
+
+    // Загружаем вопросы
+    try {
+      const questionPromises = Object.keys(testNames).map(async (key) => {
+        const test = testNames[key];
+        try {
+          test.questions = await loadQuestions(test.questionsFile);
+          if (test.questions.length === 0) {
+            logger.warn(`No questions loaded for test ${key}, removing from testNames`);
+            delete testNames[key];
+          }
+        } catch (error) {
+          logger.error(`Failed to load questions for test ${key}: ${error.message}`, { stack: error.stack });
           delete testNames[key];
         }
-      } catch (error) {
-        logger.error(`Failed to load questions for test ${key}: ${error.message}`, { stack: error.stack });
-        delete testNames[key];
-      }
-    });
+      });
 
-    await Promise.all(questionPromises);
-    logger.info('All questions loaded');
+      await Promise.all(questionPromises);
+      logger.info('All questions loaded');
+    } catch (error) {
+      logger.warn('Failed to load questions, proceeding with available tests:', { message: error.message, stack: error.stack });
+    }
 
     if (Object.keys(testNames).length === 0) {
       logger.warn('No tests available after initialization. Server will start, but no tests will be available.');
@@ -536,8 +572,8 @@ const initializeServer = async () => {
     isInitialized = true;
     logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
   } catch (error) {
-    logger.error(`Failed to initialize server, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    throw error;
+    logger.error(`Unexpected error during server initialization, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+    isInitialized = false;
   }
 };
 
