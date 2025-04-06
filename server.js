@@ -565,7 +565,7 @@ const initializeServer = async () => {
       ]);
       logger.info('Redis connection established');
     } catch (error) {
-      logger.warn('Failed to connect to Redis, proceeding without Redis:', { message: error.message });
+      logger.warn('Failed to connect to Redis, proceeding without Redis:', { message: error.message, stack: error.stack });
       redisReady = false;
     }
 
@@ -595,7 +595,7 @@ const initializeServer = async () => {
     logger.info('Step 5: Attempting to load test names...');
     try {
       await loadTestNames();
-      logger.info('Test names loaded');
+      logger.info(`Loaded ${Object.keys(testNames).length} test names`);
     } catch (error) {
       logger.warn('Failed to load test names, proceeding with empty test list:', { message: error.message, stack: error.stack });
       testNames = {};
@@ -786,9 +786,11 @@ app.get('/', async (req, res) => {
         </body>
       </html>
     `);
+    logger.info(`GET / completed, took ${Date.now() - startTime}ms`);
   } catch (err) {
-    logger.error(`Error in GET /, took ${Date.now() - startTime}ms: ${err.message}`, { stack: err.stack });
+    logger.error(`Error in GET /: ${err.message}`, { stack: err.stack });
     res.status(500).send('Помилка сервера');
+    logger.info(`GET / failed, took ${Date.now() - startTime}ms`);
   }
 });
 
