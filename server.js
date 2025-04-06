@@ -4,6 +4,8 @@ const path = require('path');
 const ExcelJS = require('exceljs');
 const { createClient } = require('redis');
 const fs = require('fs');
+const cors = require('cors');
+app.use(cors());
 
 const app = express();
 
@@ -165,16 +167,19 @@ app.get('/', (req, res) => {
 app.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    console.log('Checking password:', username, 'against validPasswords');
+    console.log('Received login request:', { username, password });
 
     const users = await loadUsersFromExcel();
+    console.log('Loaded users:', users);
+
     const user = users.find(u => u.username === username && u.password === password);
     if (!user) {
+      console.log('Login failed: Invalid username or password');
       return res.status(401).json({ success: false, message: 'Invalid username or password' });
     }
 
-    // Редирект на главную страницу
-    res.redirect('/');
+    console.log('Login successful for user:', username);
+    res.status(200).json({ success: true, message: 'Login successful', redirect: '/' });
   } catch (err) {
     console.error('Error during login:', err);
     res.status(500).json({ success: false, message: 'Internal Server Error' });
