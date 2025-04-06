@@ -495,86 +495,86 @@ const checkAdmin = (req, res, next) => {
 // Инициализация сервера
 const initializeServer = async () => {
   const startTime = Date.now();
+  logger.info('Starting server initialization...');
+
+  // Проверяем Redis
   try {
-    logger.info('Starting server initialization...');
+    logger.info('Attempting to connect to Redis...');
+    const redisTimeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Redis connection timed out after 5 seconds')), 5000);
+    });
 
-    // Проверяем Redis
-    try {
-      const redisTimeout = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Redis connection timed out after 5 seconds')), 5000);
-      });
+    await Promise.race([
+      new Promise((resolve, reject) => {
+        redis.once('ready', () => {
+          redisReady = true;
+          logger.info('Redis is ready to accept commands');
+          resolve();
+        });
+        redis.on('error', (error) => {
+          logger.error('Redis connection error:', { message: error.message, stack: error.stack });
+          reject(error);
+        });
+      }),
+      redisTimeout,
+    ]);
+    logger.info('Redis connection established');
+  } catch (error) {
+    logger.warn('Failed to connect to Redis, proceeding without Redis:', { message: error.message });
+    redisReady = false; // Продолжаем без Redis
+  }
 
-      await Promise.race([
-        new Promise((resolve, reject) => {
-          redis.once('ready', () => {
-            redisReady = true;
-            logger.info('Redis is ready to accept commands');
-            resolve();
-          });
-          redis.on('error', (error) => {
-            logger.error('Redis connection error:', { message: error.message, stack: error.stack });
-            reject(error);
-          });
-        }),
-        redisTimeout,
-      ]);
-      logger.info('Redis connection established');
-    } catch (error) {
-      logger.warn('Failed to connect to Redis, proceeding without Redis:', { message: error.message });
-      redisReady = false; // Продолжаем без Redis
-    }
+  // Загружаем пользователей
+  let usersFromBlob = [];
+  try {
+    logger.info('Attempting to load users from Blob Storage...');
+    usersFromBlob = await loadUsers();
+    logger.info(`Loaded ${usersFromBlob.length} users from Blob Storage`);
+  } catch (error) {
+    logger.warn('Failed to load users from Blob Storage, proceeding with empty user list:', { message: error.message, stack: error.stack });
+    usersFromBlob = [];
+  }
 
-    // Загружаем пользователей
-    let usersFromBlob = [];
-    try {
-      usersFromBlob = await loadUsers();
-      logger.info(`Loaded ${usersFromBlob.length} users from Blob Storage`);
-    } catch (error) {
-      logger.warn('Failed to load users from Blob Storage, proceeding with empty user list:', { message: error.message, stack: error.stack });
-      usersFromBlob = [];
-    }
+  // Загружаем тесты
+  try {
+    logger.info('Attempting to load test names...');
+    await loadTestNames();
+    logger.info('Test names loaded');
+  } catch (error) {
+    logger.warn('Failed to load test names, proceeding with empty test list:', { message: error.message, stack: error.stack });
+    testNames = {};
+  }
 
-    // Загружаем тесты
-    try {
-      await loadTestNames();
-      logger.info('Test names loaded');
-    } catch (error) {
-      logger.warn('Failed to load test names, proceeding with empty test list:', { message: error.message, stack: error.stack });
-      testNames = {};
-    }
-
-    // Загружаем вопросы
-    try {
-      const questionPromises = Object.keys(testNames).map(async (key) => {
-        const test = testNames[key];
-        try {
-          test.questions = await loadQuestions(test.questionsFile);
-          if (test.questions.length === 0) {
-            logger.warn(`No questions loaded for test ${key}, removing from testNames`);
-            delete testNames[key];
-          }
-        } catch (error) {
-          logger.error(`Failed to load questions for test ${key}: ${error.message}`, { stack: error.stack });
+  // Загружаем вопросы
+  try {
+    logger.info('Attempting to load questions...');
+    const questionPromises = Object.keys(testNames).map(async (key) => {
+      const test = testNames[key];
+      try {
+        logger.info(`Loading questions for test ${key}...`);
+        test.questions = await loadQuestions(test.questionsFile);
+        if (test.questions.length === 0) {
+          logger.warn(`No questions loaded for test ${key}, removing from testNames`);
           delete testNames[key];
         }
-      });
+      } catch (error) {
+        logger.error(`Failed to load questions for test ${key}: ${error.message}`, { stack: error.stack });
+        delete testNames[key];
+      }
+    });
 
-      await Promise.all(questionPromises);
-      logger.info('All questions loaded');
-    } catch (error) {
-      logger.warn('Failed to load questions, proceeding with available tests:', { message: error.message, stack: error.stack });
-    }
-
-    if (Object.keys(testNames).length === 0) {
-      logger.warn('No tests available after initialization. Server will start, but no tests will be available.');
-    }
-
-    isInitialized = true;
-    logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
+    await Promise.all(questionPromises);
+    logger.info('All questions loaded');
   } catch (error) {
-    logger.error(`Unexpected error during server initialization, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    isInitialized = false;
+    logger.warn('Failed to load questions, proceeding with available tests:', { message: error.message, stack: error.stack });
   }
+
+  if (Object.keys(testNames).length === 0) {
+    logger.warn('No tests available after initialization. Server will start, but no tests will be available.');
+  }
+
+  isInitialized = true;
+  logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
 };
 
 // Главная страница (вход)
@@ -1938,54 +1938,34 @@ const gracefulShutdown = (server) => {
 const startServer = async () => {
   const port = process.env.PORT || 3000;
   let server;
-
   try {
-    // Инициализация сервера
-    await initializeServer();
-
-    // Запуск сервера
     server = app.listen(port, () => {
       logger.info(`Server is running on port ${port}`);
     });
 
-    // Обработка ошибок сервера
-    server.on('error', (error) => {
-      logger.error('Server error:', {
-        message: error.message,
-        stack: error.stack,
-        port,
-      });
-      process.exit(1);
+    // Выполняем инициализацию в фоновом
+    initializeServer().catch((error) => {
+      logger.error('Background initialization failed:', { message: error.message, stack: error.stack });
     });
 
-    // Обработка сигналов для graceful shutdown
-    process.on('SIGTERM', gracefulShutdown(server));
-    process.on('SIGINT', gracefulShutdown(server));
-
-    // Обработка необработанных исключений
-    process.on('uncaughtException', (error) => {
-      logger.error('Uncaught Exception:', {
-        message: error.message,
-        stack: error.stack,
+    const signals = ['SIGINT', 'SIGTERM'];
+    signals.forEach((signal) => {
+      process.on(signal, async () => {
+        logger.info(`Received ${signal}, shutting down...`);
+        if (server) {
+          server.close(() => {
+            logger.info('Server closed');
+            process.exit(0);
+          });
+        }
+        setTimeout(() => {
+          logger.error('Shutdown timed out, forcing exit');
+          process.exit(1);
+        }, 10000);
       });
-      gracefulShutdown(server)();
     });
-
-    // Обработка необработанных отклонений промисов
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled Rejection at:', {
-        promise,
-        reason: reason instanceof Error ? reason.message : reason,
-        stack: reason instanceof Error ? reason.stack : undefined,
-      });
-      // Не завершаем процесс, так как это может быть некритично
-    });
-
   } catch (error) {
-    logger.error('Failed to start server:', {
-      message: error.message,
-      stack: error.stack,
-    });
+    logger.error('Failed to start server:', { message: error.message, stack: error.stack });
     process.exit(1);
   }
 };
