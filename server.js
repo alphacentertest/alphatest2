@@ -523,7 +523,7 @@ const initializePasswords = async () => {
   logger.info(`Initialized passwords for ${Object.keys(validPasswords).length} users`);
 };
 
-// Инициализация сервера с улучшенным логированием и обработкой ошибок
+// Инициализация сервера с улучшенным логированием
 const initializeServer = async () => {
   const startTime = Date.now();
   logger.info('Starting server initialization...');
@@ -533,6 +533,7 @@ const initializeServer = async () => {
     logger.info('Step 1: Checking environment variables...');
     for (const envVar of requiredEnvVars) {
       if (!process.env[envVar]) {
+        logger.error(`Missing required environment variable: ${envVar}`);
         throw new Error(`Missing required environment variable: ${envVar}`);
       }
     }
@@ -546,17 +547,19 @@ const initializeServer = async () => {
       });
 
       await Promise.race([
-        new Promise((resolve) => {
+        new Promise((resolve, reject) => {
           if (redisReady) {
             logger.info('Redis already ready');
             resolve();
           } else {
             redis.once('ready', () => {
               logger.info('Redis is ready to accept commands');
+              redisReady = true;
               resolve();
             });
             redis.once('error', (error) => {
               logger.error('Redis connection error during initialization:', { message: error.message, stack: error.stack });
+              redisReady = false;
               reject(error);
             });
           }
@@ -587,7 +590,7 @@ const initializeServer = async () => {
       await initializePasswords();
       logger.info('Passwords initialized successfully');
     } catch (error) {
-      logger.error('Failed to initialize passwords:', { message: error.message, stack: error.stack });
+      logger.warn('Failed to initialize passwords, proceeding with empty passwords:', { message: error.message, stack: error.stack });
       users = [];
     }
 
@@ -671,11 +674,12 @@ app.get('/', async (req, res) => {
 
     const user = req.cookies.auth;
     if (user) {
-      logger.info(`User already authenticated, redirecting, took ${Date.now() - startTime}ms`);
+      logger.info(`User already authenticated as ${user}, redirecting`);
       return res.redirect(user === 'admin' ? '/admin' : '/select-test');
     }
 
     const savedPassword = req.cookies.savedPassword || '';
+    logger.info('Rendering login page');
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -793,82 +797,6 @@ app.get('/', async (req, res) => {
     logger.info(`GET / failed, took ${Date.now() - startTime}ms`);
   }
 });
-
-// Обработка входа
-app.post(
-  '/login',
-  [
-    body('password')
-      .trim()
-      .notEmpty()
-      .withMessage('Пароль не может быть пустым')
-      .isLength({ min: 3, max: 50 })
-      .withMessage('Пароль должен быть от 3 до 50 символов'),
-    body('rememberMe').isBoolean().withMessage('rememberMe должен быть булевым значением'),
-  ],
-  async (req, res) => {
-    const startTime = Date.now();
-    logger.info('Handling POST /login');
-
-    try {
-      if (!isInitialized) {
-        logger.warn('Server not initialized during login attempt');
-        return res.status(503).json({ success: false, message: 'Сервер не инициализирован. Спробуйте пізніше.' });
-      }
-
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        logger.warn('Validation errors:', errors.array());
-        return res.status(400).json({ success: false, message: errors.array()[0].msg });
-      }
-
-      const { password, rememberMe } = req.body;
-      logger.info(`Checking password for user input`);
-
-      let authenticatedUser = null;
-      for (const [username, storedPassword] of Object.entries(validPasswords)) {
-        const isMatch = await bcrypt.compare(password.trim(), storedPassword);
-        if (isMatch) {
-          authenticatedUser = username;
-          break;
-        }
-      }
-
-      if (!authenticatedUser) {
-        logger.warn(`Failed login attempt with password`);
-        return res.status(401).json({ success: false, message: 'Невірний пароль' });
-      }
-
-      res.cookie('auth', authenticatedUser, {
-        maxAge: 24 * 60 * 60 * 1000,
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-      });
-
-      if (rememberMe) {
-        res.cookie('savedPassword', password, {
-          maxAge: 30 * 24 * 60 * 60 * 1000,
-          httpOnly: false,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax',
-        });
-      } else {
-        res.clearCookie('savedPassword');
-      }
-
-      logger.info(`Successful login for user: ${authenticatedUser}, took ${Date.now() - startTime}ms`);
-      if (authenticatedUser === 'admin') {
-        res.json({ success: true, redirect: '/admin' });
-      } else {
-        res.json({ success: true, redirect: '/select-test' });
-      }
-    } catch (error) {
-      logger.error(`Error during login, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-      res.status(500).json({ success: false, message: 'Помилка сервера' });
-    }
-  }
-);
 
 // Выбор теста
 app.get('/select-test', checkAuth, async (req, res) => {
@@ -2085,11 +2013,17 @@ try {
 
 // Обработка favicon.ico и favicon.png
 app.get('/favicon.ico', (req, res) => {
-res.status(204).end();
+  const startTime = Date.now();
+  logger.info('Handling GET /favicon.ico');
+  res.status(204).end();
+  logger.info(`GET /favicon.ico completed, took ${Date.now() - startTime}ms`);
 });
 
 app.get('/favicon.png', (req, res) => {
-res.status(204).end();
+  const startTime = Date.now();
+  logger.info('Handling GET /favicon.png');
+  res.status(204).end();
+  logger.info(`GET /favicon.png completed, took ${Date.now() - startTime}ms`);
 });
 
 // Обработка несуществующих маршрутов
@@ -2134,15 +2068,15 @@ try {
 }
 };
 
-startServer();
-
 // Обработка непредвиденных ошибок
 process.on('uncaughtException', (error) => {
-logger.error('Uncaught Exception:', { message: error.message, stack: error.stack });
-process.exit(1);
+  logger.error('Uncaught Exception:', { message: error.message, stack: error.stack });
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-logger.error('Unhandled Rejection at:', { promise, reason: reason instanceof Error ? reason.message : reason, stack: reason instanceof Error ? reason.stack : undefined });
-process.exit(1);
+  logger.error('Unhandled Rejection at:', { promise, reason: reason instanceof Error ? reason.message : reason, stack: reason instanceof Error ? reason.stack : undefined });
+  process.exit(1);
 });
+
+startServer();
