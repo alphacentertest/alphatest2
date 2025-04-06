@@ -556,118 +556,55 @@ const initializePasswords = async () => {
 
 // Инициализация сервера
 const initializeServer = async () => {
-  const startTime = Date.now();
   logger.info('Starting server initialization...');
-
-  try {
-    // Проверяем переменные окружения
-    logger.info('Checking environment variables...');
-    for (const envVar of requiredEnvVars) {
-      if (!process.env[envVar]) {
-        throw new Error(`Missing required environment variable: ${envVar}`);
-      }
+  logger.info('Checking environment variables...');
+  for (const envVar of requiredEnvVars) {
+    if (!process.env[envVar]) {
+      logger.error(`Missing required environment variable: ${envVar}`);
+      process.exit(1);
     }
-
-    // Проверяем Redis
-    try {
-      logger.info('Attempting to connect to Redis...');
-      const redisTimeout = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Redis connection timed out after 5 seconds')), 5000);
-      });
-
-      await Promise.race([
-        new Promise((resolve) => {
-          if (redisReady) {
-            logger.info('Redis already ready');
-            resolve();
-          } else {
-            redis.once('ready', () => {
-              logger.info('Redis is ready to accept commands');
-              resolve();
-            });
-            redis.once('error', (error) => {
-              logger.error('Redis connection error during initialization:', { message: error.message, stack: error.stack });
-              reject(error);
-            });
-          }
-        }),
-        redisTimeout,
-      ]);
-      logger.info('Redis connection established');
-    } catch (error) {
-      logger.warn('Failed to connect to Redis, proceeding without Redis:', { message: error.message });
-      redisReady = false;
-    }
-
-    // Очищаем кэш вопросов
-    questionsByTestCache = {};
-
-    // Загружаем пользователей
-    let usersFromBlob = [];
-    try {
-      logger.info('Attempting to load users from Blob Storage...');
-      usersFromBlob = await loadUsers();
-      logger.info(`Loaded ${usersFromBlob.length} users from Blob Storage`);
-      users = usersFromBlob;
-    } catch (error) {
-      logger.warn('Failed to load users from Blob Storage, proceeding with empty user list:', { message: error.message, stack: error.stack });
-      users = [];
-    }
-
-    // Инициализируем пароли
-    try {
-      logger.info('Initializing passwords...');
-      await initializePasswords();
-      logger.info('Passwords initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize passwords:', { message: error.message, stack: error.stack });
-      users = [];
-    }
-
-    // Загружаем тесты
-    try {
-      logger.info('Attempting to load test names...');
-      await loadTestNames();
-      logger.info('Test names loaded');
-    } catch (error) {
-      logger.warn('Failed to load test names, proceeding with empty test list:', { message: error.message, stack: error.stack });
-      testNames = {};
-    }
-
-    // Загружаем вопросы
-    try {
-      logger.info('Attempting to load questions...');
-      const questionPromises = Object.keys(testNames).map(async (key) => {
-        const test = testNames[key];
-        try {
-          logger.info(`Loading questions for test ${key}...`);
-          test.questions = await loadQuestions(test.questionsFile);
-          if (test.questions.length === 0) {
-            logger.warn(`No questions loaded for test ${key}, removing from testNames`);
-            delete testNames[key];
-          }
-        } catch (error) {
-          logger.error(`Failed to load questions for test ${key}: ${error.message}`, { stack: error.stack });
-          delete testNames[key];
-        }
-      });
-
-      await Promise.all(questionPromises);
-      logger.info('All questions loaded');
-    } catch (error) {
-      logger.warn('Failed to load questions, proceeding with available tests:', { message: error.message, stack: error.stack });
-    }
-
-    if (Object.keys(testNames).length === 0) {
-      logger.warn('No tests available after initialization. Server will start, but no tests will be available.');
-    }
-
-    isInitialized = true;
-    logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
-  } catch (error) {
-    logger.error(`Unexpected error during server initialization, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    isInitialized = false;
   }
+
+  logger.info('Attempting to connect to Redis...');
+  try {
+    redis = new Redis(process.env.REDIS_URL, {
+      tls: {
+        ca: fs.readFileSync('/path/to/redis-ca-cert.pem'), // Укажите путь к CA-сертификату
+        rejectUnauthorized: true, // Включаем проверку сертификата
+      },
+      retryStrategy: (times) => {
+        logger.warn(`Retrying Redis connection, attempt ${times}`);
+        return Math.min(times * 50, 2000);
+      },
+    });
+
+    redis.on('error', (err) => {
+      logger.error('Redis Client Error:', { message: err.message, stack: err.stack });
+      redisReady = false;
+    });
+    redis.on('connect', () => {
+      logger.info('Connected to Redis');
+      redisReady = true;
+    });
+
+    await redis.ping();
+    logger.info('Redis connection successful');
+  } catch (error) {
+    logger.error('Failed to connect to Redis:', { message: error.message, stack: error.stack });
+    redisReady = false;
+  }
+
+  logger.info('Loading test names...');
+  try {
+    const testNamesData = await redis.get('testNames');
+    if (testNamesData) {
+      testNames = JSON.parse(testNamesData);
+    }
+  } catch (error) {
+    logger.error('Failed to load test names from Redis:', { message: error.message, stack: error.stack });
+  }
+
+  logger.info('Server initialization complete');
 };
 
 // Главная страница (вход)
