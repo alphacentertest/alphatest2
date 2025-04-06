@@ -4,7 +4,7 @@ import typescript from 'rollup-plugin-typescript2';
 import { uglify } from 'rollup-plugin-uglify';
 import path from 'path';
 
-const { minify } = process.env
+const { minify } = process.env;
 
 export default {
   input: 'src/index.ts',
@@ -13,14 +13,14 @@ export default {
       tsconfigOverride: {
         compilerOptions: {
           module: 'ES2015',
-          declaration: false
-        }
-      }
+          declaration: false,
+        },
+      },
     }),
     node(),
     commonjs({
-      include: 'node_modules/**'
-    })
+      include: 'node_modules/**',
+    }),
   ].concat(minify ? uglify() : []),
   output: {
     extend: true,
@@ -28,19 +28,21 @@ export default {
     format: 'umd',
     name: 'faceapi',
     globals: {
-      'crypto': 'crypto'
+      crypto: 'crypto',
     },
-    sourcemap: minify ? false : true
+    sourcemap: minify ? false : true,
   },
   external: ['crypto'],
   onwarn: (warning) => {
-    const ignoreWarnings = ['CIRCULAR_DEPENDENCY', 'CIRCULAR', 'THIS_IS_UNDEFINED']
-    if (ignoreWarnings.some(w => w === warning.code))
-      return
+    const ignoreWarnings = [
+      'CIRCULAR_DEPENDENCY',
+      'CIRCULAR',
+      'THIS_IS_UNDEFINED',
+    ];
+    if (ignoreWarnings.some((w) => w === warning.code)) return;
 
-    if (warning.missing === 'alea')
-      return
+    if (warning.missing === 'alea') return;
 
-    console.warn(warning.message)
-  }
-}
+    console.warn(warning.message);
+  },
+};

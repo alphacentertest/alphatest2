@@ -18,7 +18,8 @@ h1 {
   margin-bottom: 20px;
   color: red !important; /* Тестовый цвет */
 }
-input[type="password"], input[type="text"] {
+input[type='password'],
+input[type='text'] {
   font-size: 32px;
   padding: 10px;
   margin: 10px 0;
@@ -65,7 +66,7 @@ button:hover {
   justify-content: center;
   gap: 10px;
 }
-input[type="checkbox"] {
+input[type='checkbox'] {
   width: 20px;
   height: 20px;
 }
@@ -81,7 +82,8 @@ input[type="checkbox"] {
     font-size: 64px;
     margin-bottom: 30px;
   }
-  input[type="password"], input[type="text"] {
+  input[type='password'],
+  input[type='text'] {
     font-size: 48px;
     padding: 15px;
     margin: 15px 0;
@@ -99,7 +101,7 @@ input[type="checkbox"] {
     font-size: 36px;
     gap: 15px;
   }
-  input[type="checkbox"] {
+  input[type='checkbox'] {
     width: 30px;
     height: 30px;
   }

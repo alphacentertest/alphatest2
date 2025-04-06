@@ -5,9 +5,9 @@ const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 const Redis = require('ioredis');
-const logger = require('./logger');
+const logger = require('./logger'); // Предполагается, что у вас есть настроенный логгер
 const AWS = require('aws-sdk');
-const { put, get, list } = require('@vercel/blob');
+const { put, get, list } = require('@vercel/blob'); // Убедимся, что используем list напрямую
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -23,6 +23,7 @@ const requiredEnvVars = [
   'AWS_SECRET_ACCESS_KEY',
   'AWS_REGION',
   'S3_BUCKET_NAME',
+  'ADMIN_PASSWORD_HASH',
 ];
 
 for (const envVar of requiredEnvVars) {
@@ -39,27 +40,32 @@ app.get('/node-version', (req, res) => {
   res.send(`Node.js version: ${process.version}`);
 });
 
-// Настройка Redis
+// Настройка Redis с улучшенной обработкой TLS
 let redisReady = false;
-const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
+const redis = new Redis(process.env.REDIS_URL, {
   connectTimeout: 20000,
   maxRetriesPerRequest: 5,
   retryStrategy(times) {
     const delay = Math.min(times * 500, 5000);
     logger.info(`Retrying Redis connection, attempt ${times}, delay ${delay}ms`);
     if (times > 10) {
-      logger.error('Failed to connect to Redis after 10 attempts.', {
-        redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+      logger.warn('Failed to connect to Redis after 10 attempts. Proceeding without Redis.', {
+        redisUrl: process.env.REDIS_URL,
         status: redis.status,
       });
-      logger.error('Exiting...');
-      process.exit(1);
+      redisReady = false;
+      return null;
     }
     return delay;
   },
   enableOfflineQueue: true,
   enableReadyCheck: true,
-  tls: process.env.REDIS_URL && (process.env.REDIS_URL.includes('upstash.io') || process.env.REDIS_URL.includes('redis-cloud.com')) ? {} : undefined,
+  tls: process.env.REDIS_URL && (process.env.REDIS_URL.includes('upstash.io') || process.env.REDIS_URL.includes('redis-cloud.com'))
+    ? {
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: false,
+      }
+    : undefined,
 });
 
 redis.on('connect', () => {
@@ -77,7 +83,7 @@ redis.on('error', (err) => {
     message: err.message,
     stack: err.stack,
     status: redis.status,
-    redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+    redisUrl: process.env.REDIS_URL,
   });
 });
 
@@ -114,7 +120,7 @@ app.use((req, res, next) => {
   const startTime = Date.now();
   logger.info(`${req.method} ${req.url} - IP: ${req.ip}`);
   res.on('finish', () => {
-    logger.info(`${req.method} ${req.url} completed in ${Date.now() - startTime}ms`);
+    logger.info(`${req.method} ${req.url} completed in ${Date.now() - startTime}ms with status ${res.statusCode}`);
   });
   next();
 });
@@ -148,24 +154,27 @@ const upload = multer({ storage });
 let validPasswords = {};
 let users = [];
 let isInitialized = false;
-let initializationError = null;
 let testNames = {};
 
 // Middleware для проверки инициализации
 const ensureInitialized = (req, res, next) => {
   if (!isInitialized) {
-    if (initializationError) {
-      logger.error(`Server initialization failed: ${initializationError.message}`);
-      return res.status(500).json({ success: false, message: `Server initialization failed: ${initializationError.message}` });
-    }
-    logger.warn('Server is initializing, please try again later');
-    return res.status(503).json({ success: false, message: 'Server is initializing, please try again later' });
+    logger.warn('Server is not initialized, rejecting request');
+    return res.status(503).json({
+      success: false,
+      message: 'Сервер не инициализирован. Пожалуйста, попробуйте снова позже.',
+    });
   }
   next();
 };
 
-// Применяем middleware ко всем маршрутам
-app.use(ensureInitialized);
+// Применяем middleware ко всем маршрутам, кроме /node-version, /, /favicon.ico и /favicon.png
+app.use((req, res, next) => {
+  if (req.path === '/node-version' || req.path === '/' || req.path === '/favicon.ico' || req.path === '/favicon.png') {
+    return next();
+  }
+  ensureInitialized(req, res, next);
+});
 
 // Функция форматирования времени
 const formatDuration = (seconds) => {
@@ -176,21 +185,25 @@ const formatDuration = (seconds) => {
 };
 
 // Функция для получения списка файлов из Vercel Blob Storage
-const listBlobs = async () => {
+const listVercelBlobs = async () => {
+  const startTime = Date.now();
+  logger.info('Attempting to list blobs from Vercel Blob Storage');
   try {
-    logger.info('Attempting to list blobs from Vercel Blob Storage');
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      throw new Error('BLOB_READ_WRITE_TOKEN is not defined');
+    }
     const result = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
-    logger.info(`Successfully listed ${result.blobs.length} blobs from Vercel Blob Storage`);
+    logger.info(`Successfully listed ${result.blobs.length} blobs from Vercel Blob Storage, took ${Date.now() - startTime}ms`);
     return result.blobs || [];
   } catch (error) {
-    logger.error('Failed to list blobs from Vercel Blob Storage:', {
+    logger.error(`Failed to list blobs from Vercel Blob Storage, took ${Date.now() - startTime}ms:`, {
       message: error.message,
       stack: error.stack,
       token: process.env.BLOB_READ_WRITE_TOKEN ? 'Token present' : 'Token missing',
     });
-    throw error;
+    return []; // Возвращаем пустой массив вместо выброса ошибки
   }
 };
 
@@ -200,7 +213,7 @@ const loadTestNames = async () => {
   logger.info('Loading test names dynamically');
 
   try {
-    const blobs = await listBlobs();
+    const blobs = await listVercelBlobs();
     const questionFiles = blobs.filter(blob => blob.pathname.startsWith('questions') && blob.pathname.endsWith('.xlsx'));
 
     testNames = {};
@@ -225,7 +238,7 @@ const loadTestNames = async () => {
     logger.info(`Loaded ${Object.keys(testNames).length} tests dynamically, took ${Date.now() - startTime}ms`);
   } catch (error) {
     logger.error(`Failed to load test names, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    throw error;
+    testNames = {};
   }
 };
 
@@ -248,7 +261,7 @@ const loadUsers = async () => {
       }
     }
 
-    const blobs = await listBlobs();
+    const blobs = await listVercelBlobs();
     const userFile = blobs.find(blob => blob.pathname.startsWith('users-'));
     if (!userFile) {
       logger.warn('No user file found in Vercel Blob Storage');
@@ -259,7 +272,8 @@ const loadUsers = async () => {
     logger.info(`Fetching users from URL: ${blobUrl}`);
     const response = await get(blobUrl);
     if (!response.ok) {
-      throw new Error(`Не удалось загрузить файл ${blobUrl}: ${response.statusText}`);
+      logger.error(`Failed to fetch user file from ${blobUrl}: ${response.statusText}`);
+      return [];
     }
     const buffer = Buffer.from(await response.arrayBuffer());
 
@@ -301,7 +315,7 @@ const loadUsers = async () => {
     return users;
   } catch (error) {
     logger.error(`Error loading users from Blob Storage, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    throw error;
+    return [];
   }
 };
 
@@ -328,7 +342,8 @@ const loadQuestions = async (questionsFile) => {
     logger.info(`Fetching questions from URL: ${blobUrl}`);
     const response = await get(blobUrl);
     if (!response.ok) {
-      throw new Error(`Не удалось загрузить файл ${blobUrl}: ${response.statusText}`);
+      logger.error(`Failed to fetch questions file from ${blobUrl}: ${response.statusText}`);
+      return [];
     }
     const buffer = Buffer.from(await response.arrayBuffer());
 
@@ -389,7 +404,7 @@ const loadQuestions = async (questionsFile) => {
     return questions;
   } catch (error) {
     logger.error(`Error loading questions from ${questionsFile}, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    throw error;
+    return [];
   }
 };
 
@@ -492,89 +507,135 @@ const checkAdmin = (req, res, next) => {
   next();
 };
 
-// Инициализация сервера
+// Инициализация паролей
+const initializePasswords = async () => {
+  logger.info('Initializing passwords...');
+  validPasswords = {};
+
+  // Добавляем пароль администратора
+  validPasswords['admin'] = process.env.ADMIN_PASSWORD_HASH;
+
+  // Добавляем пароли пользователей
+  users.forEach(user => {
+    validPasswords[user.username] = user.password;
+  });
+
+  logger.info(`Initialized passwords for ${Object.keys(validPasswords).length} users`);
+};
+
+// Инициализация сервера с улучшенным логированием и обработкой ошибок
 const initializeServer = async () => {
   const startTime = Date.now();
   logger.info('Starting server initialization...');
 
-  // Проверяем Redis
   try {
-    logger.info('Attempting to connect to Redis...');
-    const redisTimeout = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Redis connection timed out after 5 seconds')), 5000);
-    });
+    // Проверяем переменные окружения
+    logger.info('Step 1: Checking environment variables...');
+    for (const envVar of requiredEnvVars) {
+      if (!process.env[envVar]) {
+        throw new Error(`Missing required environment variable: ${envVar}`);
+      }
+    }
+    logger.info('Environment variables checked successfully');
 
-    await Promise.race([
-      new Promise((resolve, reject) => {
-        redis.once('ready', () => {
-          redisReady = true;
-          logger.info('Redis is ready to accept commands');
-          resolve();
-        });
-        redis.on('error', (error) => {
-          logger.error('Redis connection error:', { message: error.message, stack: error.stack });
-          reject(error);
-        });
-      }),
-      redisTimeout,
-    ]);
-    logger.info('Redis connection established');
-  } catch (error) {
-    logger.warn('Failed to connect to Redis, proceeding without Redis:', { message: error.message });
-    redisReady = false; // Продолжаем без Redis
-  }
+    // Проверяем Redis
+    logger.info('Step 2: Attempting to connect to Redis...');
+    try {
+      const redisTimeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Redis connection timed out after 5 seconds')), 5000);
+      });
 
-  // Загружаем пользователей
-  let usersFromBlob = [];
-  try {
-    logger.info('Attempting to load users from Blob Storage...');
-    usersFromBlob = await loadUsers();
-    logger.info(`Loaded ${usersFromBlob.length} users from Blob Storage`);
-  } catch (error) {
-    logger.warn('Failed to load users from Blob Storage, proceeding with empty user list:', { message: error.message, stack: error.stack });
-    usersFromBlob = [];
-  }
+      await Promise.race([
+        new Promise((resolve) => {
+          if (redisReady) {
+            logger.info('Redis already ready');
+            resolve();
+          } else {
+            redis.once('ready', () => {
+              logger.info('Redis is ready to accept commands');
+              resolve();
+            });
+            redis.once('error', (error) => {
+              logger.error('Redis connection error during initialization:', { message: error.message, stack: error.stack });
+              reject(error);
+            });
+          }
+        }),
+        redisTimeout,
+      ]);
+      logger.info('Redis connection established');
+    } catch (error) {
+      logger.warn('Failed to connect to Redis, proceeding without Redis:', { message: error.message });
+      redisReady = false;
+    }
 
-  // Загружаем тесты
-  try {
-    logger.info('Attempting to load test names...');
-    await loadTestNames();
-    logger.info('Test names loaded');
-  } catch (error) {
-    logger.warn('Failed to load test names, proceeding with empty test list:', { message: error.message, stack: error.stack });
-    testNames = {};
-  }
+    // Загружаем пользователей
+    logger.info('Step 3: Attempting to load users from Blob Storage...');
+    let usersFromBlob = [];
+    try {
+      usersFromBlob = await loadUsers();
+      logger.info(`Loaded ${usersFromBlob.length} users from Blob Storage`);
+      users = usersFromBlob;
+    } catch (error) {
+      logger.warn('Failed to load users from Blob Storage, proceeding with empty user list:', { message: error.message, stack: error.stack });
+      users = [];
+    }
 
-  // Загружаем вопросы
-  try {
-    logger.info('Attempting to load questions...');
-    const questionPromises = Object.keys(testNames).map(async (key) => {
-      const test = testNames[key];
-      try {
-        logger.info(`Loading questions for test ${key}...`);
-        test.questions = await loadQuestions(test.questionsFile);
-        if (test.questions.length === 0) {
-          logger.warn(`No questions loaded for test ${key}, removing from testNames`);
+    // Инициализируем пароли
+    logger.info('Step 4: Initializing passwords...');
+    try {
+      await initializePasswords();
+      logger.info('Passwords initialized successfully');
+    } catch (error) {
+      logger.error('Failed to initialize passwords:', { message: error.message, stack: error.stack });
+      users = [];
+    }
+
+    // Загружаем тесты
+    logger.info('Step 5: Attempting to load test names...');
+    try {
+      await loadTestNames();
+      logger.info('Test names loaded');
+    } catch (error) {
+      logger.warn('Failed to load test names, proceeding with empty test list:', { message: error.message, stack: error.stack });
+      testNames = {};
+    }
+
+    // Загружаем вопросы
+    logger.info('Step 6: Attempting to load questions...');
+    try {
+      const questionPromises = Object.keys(testNames).map(async (key) => {
+        const test = testNames[key];
+        try {
+          logger.info(`Loading questions for test ${key}...`);
+          test.questions = await loadQuestions(test.questionsFile);
+          if (test.questions.length === 0) {
+            logger.warn(`No questions loaded for test ${key}, removing from testNames`);
+            delete testNames[key];
+          }
+        } catch (error) {
+          logger.error(`Failed to load questions for test ${key}: ${error.message}`, { stack: error.stack });
           delete testNames[key];
         }
-      } catch (error) {
-        logger.error(`Failed to load questions for test ${key}: ${error.message}`, { stack: error.stack });
-        delete testNames[key];
-      }
-    });
+      });
 
-    await Promise.all(questionPromises);
-    logger.info('All questions loaded');
+      await Promise.all(questionPromises);
+      logger.info('All questions loaded');
+    } catch (error) {
+      logger.warn('Failed to load questions, proceeding with available tests:', { message: error.message, stack: error.stack });
+    }
+
+    if (Object.keys(testNames).length === 0) {
+      logger.warn('No tests available after initialization. Server will start, but no tests will be available.');
+    }
+
+    isInitialized = true;
+    logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
   } catch (error) {
-    logger.warn('Failed to load questions, proceeding with available tests:', { message: error.message, stack: error.stack });
+    logger.error(`Unexpected error during server initialization, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+    isInitialized = false;
+    throw error; // Бросаем ошибку, чтобы увидеть её в логах Vercel
   }
-
-  if (Object.keys(testNames).length === 0) {
-    logger.warn('No tests available after initialization. Server will start, but no tests will be available.');
-  }
-
-  isInitialized = true;
-  logger.info(`Server initialized successfully, took ${Date.now() - startTime}ms`);
 };
 
 // Главная страница (вход)
@@ -583,6 +644,31 @@ app.get('/', async (req, res) => {
   logger.info('Handling GET /');
 
   try {
+    if (!isInitialized) {
+      logger.warn('Server is not initialized, rejecting request');
+      return res.status(503).send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Сервер не готовий</title>
+            <style>
+              body { font-size: 16px; margin: 20px; text-align: center; }
+              h1 { font-size: 24px; margin-bottom: 20px; }
+              button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+              button:hover { background-color: #0056b3; }
+            </style>
+          </head>
+          <body>
+            <h1>Сервер не готовий</h1>
+            <p>Сервер ще ініціалізується. Спробуйте ще раз через кілька секунд.</p>
+            <button onclick="window.location.reload()">Оновити сторінку</button>
+          </body>
+        </html>
+      `);
+    }
+
     const user = req.cookies.auth;
     if (user) {
       logger.info(`User already authenticated, redirecting, took ${Date.now() - startTime}ms`);
@@ -723,9 +809,9 @@ app.post(
     logger.info('Handling POST /login');
 
     try {
-      if (!redisReady) {
-        logger.warn('Redis not ready during login attempt');
-        return res.status(503).json({ success: false, message: 'Сервер ще ініціалізується. Спробуйте пізніше.' });
+      if (!isInitialized) {
+        logger.warn('Server not initialized during login attempt');
+        return res.status(503).json({ success: false, message: 'Сервер не инициализирован. Спробуйте пізніше.' });
       }
 
       const errors = validationResult(req);
@@ -870,7 +956,7 @@ app.get('/test/start', checkAuth, async (req, res) => {
 
   try {
     const { testNumber } = req.query;
-    if (!testNames[testNumber]) {
+    if (!testNumber || !testNames[testNumber]) {
       logger.warn(`Test ${testNumber} not found`);
       return res.status(400).send('Тест не знайдено');
     }
@@ -912,7 +998,7 @@ app.get('/test/question', checkAuth, async (req, res) => {
 
     const { questions, testNumber, answers, startTime: testStartTime } = userTest;
     const index = parseInt(req.query.index) || 0;
-    if (index < 0 || index >= questions.length) {
+    if (isNaN(index) || index < 0 || index >= questions.length) {
       logger.warn(`Invalid question index ${index} for user ${req.user}`);
       return res.status(400).send('Невірний номер питання');
     }
@@ -1176,7 +1262,7 @@ app.post('/test/save-answer', checkAuth, async (req, res) => {
     const idx = parseInt(index);
     const { questions, answers, testNumber, startTime: testStartTime } = userTest;
 
-    if (idx < 0 || idx >= questions.length) {
+    if (isNaN(idx) || idx < 0 || idx >= questions.length) {
       logger.warn(`Invalid question index ${idx} for user ${req.user}`);
       return res.status(400).send('Невірний номер питання');
     }
@@ -1346,25 +1432,44 @@ app.get('/admin', checkAdmin, async (req, res) => {
   logger.info('Handling GET /admin');
 
   try {
+    // Получаем результаты тестов из Redis
     let results = [];
     if (redisReady) {
       results = await redis.lrange('test_results', 0, -1);
+      logger.info(`Retrieved ${results.length} test results from Redis`);
+    } else {
+      logger.warn('Redis is not available, proceeding with empty results');
     }
-    const parsedResults = results.map(r => JSON.parse(r));
 
+    // Парсим результаты
+    const parsedResults = results.map(r => {
+      try {
+        return JSON.parse(r);
+      } catch (parseError) {
+        logger.error(`Failed to parse test result: ${r}`, { error: parseError.message, stack: parseError.stack });
+        return null;
+      }
+    }).filter(result => result !== null);
+
+    // Загружаем вопросы для каждого теста
     const questionsByTest = {};
     for (const result of parsedResults) {
       const testNumber = result.testNumber;
-      if (!questionsByTest[testNumber]) {
+      if (!questionsByTest[testNumber] && testNames[testNumber]) {
         try {
           questionsByTest[testNumber] = await loadQuestions(testNames[testNumber].questionsFile);
+          logger.info(`Loaded questions for test ${testNumber}`);
         } catch (error) {
-          logger.error(`Ошибка загрузки вопросов для теста ${testNumber}: ${error.message}`, { stack: error.stack });
+          logger.error(`Error loading questions for test ${testNumber}: ${error.message}`, { stack: error.stack });
           questionsByTest[testNumber] = [];
         }
       }
     }
 
+    // Получаем состояние камеры заранее
+    const cameraMode = await getCameraMode();
+
+    // Формируем HTML-ответ
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -1393,7 +1498,8 @@ app.get('/admin', checkAdmin, async (req, res) => {
             <button onclick="window.location.href='/admin/edit-tests'">Редагувати тести</button>
             <button onclick="window.location.href='/admin/view-results'">Перегляд результатів тестів</button>
             <button onclick="deleteResults()">Видалити результати тестів</button>
-            <button onclick="toggleCamera()">Камера: ${await getCameraMode() ? 'Вимкнути' : 'Увімкнути'}</button>
+            <button onclick="toggleCamera()">Камера: ${cameraMode ? 'Вимкнути' : 'Увімкнути'}</button>
+            <button onclick="window.location.href='/admin/upload-users'">Завантажити користувачів</button>
             <button onclick="window.location.href='/logout'">Вийти</button>
           </div>
           <h2>Результати тестів</h2>
@@ -1410,14 +1516,18 @@ app.get('/admin', checkAdmin, async (req, res) => {
               </tr>
             </thead>
             <tbody>
-              ${parsedResults.map((result, idx) => `
+              ${parsedResults.length === 0 ? `
                 <tr>
-                  <td>${result.user}</td>
+                  <td colspan="7" style="text-align: center;">Немає результатів тестів</td>
+                </tr>
+              ` : parsedResults.map((result, idx) => `
+                <tr>
+                  <td>${result.user || 'Невідомий користувач'}</td>
                   <td>${testNames[result.testNumber]?.name || 'Невідомий тест'}</td>
-                  <td>${result.score} / ${result.totalPoints}</td>
-                  <td>${formatDuration(result.duration)}</td>
-                  <td>${Math.round((result.suspiciousBehavior / (result.duration || 1)) * 100)}%</td>
-                  <td>${new Date(result.endTime).toLocaleString()}</td>
+                  <td>${result.score || 0} / ${result.totalPoints || 0}</td>
+                  <td>${formatDuration(result.duration || 0)}</td>
+                  <td>${Math.round((result.suspiciousBehavior || 0) / (result.duration || 1)) * 100}%</td>
+                  <td>${result.endTime ? new Date(result.endTime).toLocaleString() : 'Невідомо'}</td>
                   <td>
                     <button onclick="toggleAnswers(${idx})">Показати відповіді</button>
                   </td>
@@ -1425,16 +1535,18 @@ app.get('/admin', checkAdmin, async (req, res) => {
                 <tr>
                   <td colspan="7">
                     <div id="answers-${idx}" class="answers">
-                      ${Object.entries(result.answers).map(([qIdx, answer]) => {
+                      ${(result.answers && Array.isArray(result.answers) ? result.answers : []).map((answer, qIdx) => {
                         const question = questionsByTest[result.testNumber]?.[qIdx];
-                        if (!question) return `<p>Питання ${parseInt(qIdx) + 1}: Відповідь: ${answer} (Питання не знайдено)</p>`;
-                        const isCorrect = result.scoresPerQuestion[qIdx] > 0;
+                        if (!question) {
+                          return `<p>Питання ${qIdx + 1}: Відповідь: ${answer || 'Немає відповіді'} (Питання не знайдено)</p>`;
+                        }
+                        const isCorrect = result.scoresPerQuestion && result.scoresPerQuestion[qIdx] > 0;
                         return `
                           <p>
-                            Питання ${parseInt(qIdx) + 1}: ${question.text}<br>
-                            Відповідь: ${Array.isArray(answer) ? answer.join(', ') : answer}<br>
-                            Правильна відповідь: ${question.correctAnswers.join(', ')}<br>
-                            Оцінка: ${result.scoresPerQuestion[qIdx]} / ${question.points} (${isCorrect ? 'Правильно' : 'Неправильно'})
+                            Питання ${qIdx + 1}: ${question.text || 'Невідоме питання'}<br>
+                            Відповідь: ${Array.isArray(answer) ? answer.join(', ') : (answer || 'Немає відповіді')}<br>
+                            Правильна відповідь: ${(question.correctAnswers && Array.isArray(question.correctAnswers) ? question.correctAnswers.join(', ') : 'Невідомо')}<br>
+                            Оцінка: ${(result.scoresPerQuestion && result.scoresPerQuestion[qIdx] !== undefined ? result.scoresPerQuestion[qIdx] : 0)} / ${(question.points || 0)} (${isCorrect ? 'Правильно' : 'Неправильно'})
                           </p>
                         `;
                       }).join('')}
@@ -1447,7 +1559,26 @@ app.get('/admin', checkAdmin, async (req, res) => {
           <script>
             async function deleteResults() {
               if (confirm('Ви впевнені, що хочете видалити всі результати тестів?')) {
-                const response = await fetch('/admin/delete-results', {
+                try {
+                  const response = await fetch('/admin/delete-results', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                  });
+                  const result = await response.json();
+                  if (result.success) {
+                    window.location.reload();
+                  } else {
+                    alert('Помилка при видаленні результатів: ' + result.message);
+                  }
+                } catch (error) {
+                  alert('Помилка при видаленні результатів: ' + error.message);
+                }
+              }
+            }
+
+            async function toggleCamera() {
+              try {
+                const response = await fetch('/admin/toggle-camera', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' }
                 });
@@ -1455,27 +1586,18 @@ app.get('/admin', checkAdmin, async (req, res) => {
                 if (result.success) {
                   window.location.reload();
                 } else {
-                  alert('Помилка при видаленні результатів: ' + result.message);
+                  alert('Помилка при зміні стану камери: ' + result.message);
                 }
-              }
-            }
-
-            async function toggleCamera() {
-              const response = await fetch('/admin/toggle-camera', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-              });
-              const result = await response.json();
-              if (result.success) {
-                window.location.reload();
-              } else {
-                alert('Помилка при зміні стану камери: ' + result.message);
+              } catch (error) {
+                alert('Помилка при зміні стану камери: ' + error.message);
               }
             }
 
             function toggleAnswers(index) {
               const answersDiv = document.getElementById('answers-' + index);
-              answersDiv.style.display = answersDiv.style.display === 'block' ? 'none' : 'block';
+              if (answersDiv) {
+                answersDiv.style.display = answersDiv.style.display === 'block' ? 'none' : 'block';
+              }
             }
           </script>
         </body>
@@ -1483,47 +1605,57 @@ app.get('/admin', checkAdmin, async (req, res) => {
     `);
     logger.info(`GET /admin completed, took ${Date.now() - startTime}ms`);
   } catch (error) {
-    logger.error(`Error in GET /admin, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+    logger.error(`Error in GET /admin: ${error.message}`, { stack: error.stack });
     res.status(500).send('Помилка сервера');
+    logger.info(`GET /admin failed, took ${Date.now() - startTime}ms`);
   }
 });
 
+// Удаление результатов тестов
 app.post('/admin/delete-results', checkAdmin, async (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling POST /admin/delete-results');
+const startTime = Date.now();
+logger.info('Handling POST /admin/delete-results');
 
-  try {
-    if (redisReady) {
-      await redis.del('test_results');
-    }
-    logger.info(`Test results deleted, took ${Date.now() - startTime}ms`);
-    res.json({ success: true, message: 'Результати тестів успішно видалені' });
-  } catch (error) {
-    logger.error(`Error in POST /admin/delete-results, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    res.status(500).json({ success: false, message: 'Помилка при видаленні результатів' });
+try {
+  if (redisReady) {
+    await redis.del('test_results');
+    logger.info('All test results deleted successfully');
+    res.json({ success: true, message: 'Результати тестів видалено' });
+  } else {
+    logger.warn('Redis unavailable, cannot delete test results');
+    res.status(503).json({ success: false, message: 'Redis недоступний, не вдалося видалити результати' });
   }
+  logger.info(`POST /admin/delete-results completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in POST /admin/delete-results, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).json({ success: false, message: 'Помилка сервера' });
+}
 });
 
+// Переключение режима камеры
 app.post('/admin/toggle-camera', checkAdmin, async (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling POST /admin/toggle-camera');
+const startTime = Date.now();
+logger.info('Handling POST /admin/toggle-camera');
 
-  try {
-    const currentMode = await getCameraMode();
-    await setCameraMode(!currentMode);
-    logger.info(`Camera mode toggled to ${!currentMode}, took ${Date.now() - startTime}ms`);
-    res.json({ success: true, message: `Камера ${!currentMode ? 'увімкнена' : 'вимкнена'}` });
-  } catch (error) {
-    logger.error(`Error in POST /admin/toggle-camera, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    res.status(500).json({ success: false, message: 'Помилка при зміні стану камери' });
-  }
+try {
+  const currentMode = await getCameraMode();
+  const newMode = !currentMode;
+  await setCameraMode(newMode);
+  logger.info(`Camera mode toggled to ${newMode}`);
+  res.json({ success: true, message: `Камера ${newMode ? 'увімкнена' : 'вимкнена'}` });
+  logger.info(`POST /admin/toggle-camera completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in POST /admin/toggle-camera, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).json({ success: false, message: 'Помилка сервера' });
+}
 });
 
-// Страница создания теста
-app.get('/admin/create-test', checkAdmin, (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling GET /admin/create-test');
+// Создание нового теста
+app.get('/admin/create-test', checkAdmin, async (req, res) => {
+const startTime = Date.now();
+logger.info('Handling GET /admin/create-test');
 
+try {
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -1532,75 +1664,96 @@ app.get('/admin/create-test', checkAdmin, (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Створити тест</title>
         <style>
-          body { font-size: 16px; margin: 20px; text-align: center; }
+          body { font-size: 16px; margin: 20px; }
           h1 { font-size: 24px; margin-bottom: 20px; }
-          form { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-          input, button { font-size: 16px; padding: 10px; width: 100%; max-width: 300px; box-sizing: border-box; }
-          button { border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+          form { display: flex; flex-direction: column; gap: 10px; max-width: 500px; }
+          label { margin-top: 10px; }
+          input, select { font-size: 16px; padding: 5px; width: 100%; box-sizing: border-box; }
+          button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; margin-top: 10px; }
           button:hover { background-color: #0056b3; }
           .error { color: red; margin-top: 10px; }
         </style>
       </head>
       <body>
         <h1>Створити тест</h1>
-        <form id="createTestForm" enctype="multipart/form-data" method="POST" action="/admin/create-test">
-          <input type="text" name="testName" placeholder="Назва тесту" required>
-          <input type="number" name="timeLimit" placeholder="Ліміт часу (сек)" required>
+        <form action="/admin/create-test" method="POST" enctype="multipart/form-data">
+          <label>Назва тесту:</label>
+          <input type="text" name="testName" required>
+          <label>Ліміт часу (секунд):</label>
+          <input type="number" name="timeLimit" value="3600" required>
+          <label>Файл з питаннями (.xlsx):</label>
           <input type="file" name="questionsFile" accept=".xlsx" required>
-          <button type="submit">Створити</button>
+          <button type="submit">Створити тест</button>
         </form>
-        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-        <p id="error" class="error"></p>
+        <button onclick="window.location.href='/admin'">Повернутися</button>
       </body>
     </html>
   `);
   logger.info(`GET /admin/create-test completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in GET /admin/create-test, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).send('Помилка сервера');
+}
 });
 
-// Обработка создания теста
 app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling POST /admin/create-test');
+const startTime = Date.now();
+logger.info('Handling POST /admin/create-test');
 
-  try {
-    const { testName, timeLimit } = req.body;
-    const file = req.file;
+try {
+  const { testName, timeLimit } = req.body;
+  const questionsFile = req.file;
 
-    if (!testName || !timeLimit || !file) {
-      logger.warn('Missing required fields for test creation');
-      return res.status(400).send('Усі поля обов’язкові');
-    }
-
-    const newTestNumber = String(Object.keys(testNames).length + 1);
-    const questionsFileName = `questions${newTestNumber}.xlsx`;
-
-    let blob;
-    try {
-      blob = await put(questionsFileName, fs.readFileSync(file.path), { access: 'public', token: process.env.BLOB_READ_WRITE_TOKEN });
-    } catch (blobError) {
-      logger.error('Ошибка при загрузке в Vercel Blob:', blobError);
-      throw new Error('Не удалось загрузить файл в хранилище');
-    }
-
-    testNames[newTestNumber] = { name: testName, timeLimit: parseInt(timeLimit), questionsFile: questionsFileName };
-    if (redisReady) {
-      await redis.set('testNames', JSON.stringify(testNames));
-    }
-    fs.unlinkSync(file.path);
-
-    logger.info(`Test ${newTestNumber} created, took ${Date.now() - startTime}ms`);
-    res.redirect('/admin');
-  } catch (error) {
-    logger.error(`Error in POST /admin/create-test, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    res.status(500).send('Помилка сервера');
+  if (!testName || !timeLimit || !questionsFile) {
+    logger.warn('Missing required fields in create-test request');
+    return res.status(400).send('Усі поля обов’язкові');
   }
+
+  const timeLimitNum = parseInt(timeLimit);
+  if (isNaN(timeLimitNum) || timeLimitNum <= 0) {
+    logger.warn('Invalid time limit provided');
+    return res.status(400).send('Ліміт часу має бути додатним числом');
+  }
+
+  // Загружаем файл в Vercel Blob Storage
+  const blobPath = `questions-${Date.now()}-${questionsFile.originalname}`;
+  const blob = await put(blobPath, fs.createReadStream(questionsFile.path), {
+    access: 'public',
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+  });
+
+  // Добавляем новый тест в testNames
+  const newTestNumber = String(Object.keys(testNames).length + 1);
+  testNames[newTestNumber] = {
+    name: testName,
+    timeLimit: timeLimitNum,
+    questionsFile: blobPath,
+  };
+
+  // Кэшируем обновленные testNames в Redis
+  if (redisReady) {
+    await redis.set('testNames', JSON.stringify(testNames));
+    logger.info('Updated testNames cached in Redis');
+  }
+
+  // Удаляем временный файл
+  fs.unlinkSync(questionsFile.path);
+
+  logger.info(`Test ${newTestNumber} created successfully`);
+  res.redirect('/admin');
+  logger.info(`POST /admin/create-test completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in POST /admin/create-test, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).send('Помилка сервера');
+}
 });
 
-// Страница редактирования тестов
-app.get('/admin/edit-tests', checkAdmin, (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling GET /admin/edit-tests');
+// Редактирование тестов
+app.get('/admin/edit-tests', checkAdmin, async (req, res) => {
+const startTime = Date.now();
+logger.info('Handling GET /admin/edit-tests');
 
+try {
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -1611,9 +1764,10 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
         <style>
           body { font-size: 16px; margin: 20px; }
           h1 { font-size: 24px; margin-bottom: 20px; }
-          .test { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
-          input[type="text"], input[type="number"] { font-size: 16px; padding: 5px; margin: 5px 0; width: 100%; max-width: 300px; box-sizing: border-box; }
-          button { font-size: 16px; padding: 5px 10px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; margin: 5px 0; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+          th { background-color: #f0f0f0; }
+          button { font-size: 16px; padding: 5px 10px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
           button:hover { background-color: #0056b3; }
           .delete-btn { background-color: #dc3545; }
           .delete-btn:hover { background-color: #c82333; }
@@ -1621,51 +1775,47 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
       </head>
       <body>
         <h1>Редагувати тести</h1>
-        <div id="tests">
-          ${Object.entries(testNames).map(([num, data]) => `
-            <div class="test" data-test-num="${num}">
-              <label>Назва тесту ${num}:</label>
-              <input type="text" value="${data.name}" data-field="name">
-              <label>Часовий ліміт (секунд):</label>
-              <input type="number" value="${data.timeLimit}" data-field="timeLimit">
-              <label>Файл з питаннями:</label>
-              <input type="text" value="${data.questionsFile}" data-field="questionsFile" readonly>
-              <button onclick="saveTest('${num}')">Зберегти</button>
-              <button class="delete-btn" onclick="deleteTest('${num}')">Видалити</button>
-            </div>
-          `).join('')}
-        </div>
-        <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
+        <table>
+          <thead>
+            <tr>
+              <th>Номер тесту</th>
+              <th>Назва</th>
+              <th>Ліміт часу</th>
+              <th>Файл питань</th>
+              <th>Дії</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${Object.entries(testNames).map(([num, test]) => `
+              <tr>
+                <td>${num}</td>
+                <td>${test.name}</td>
+                <td>${test.timeLimit} с</td>
+                <td>${test.questionsFile}</td>
+                <td>
+                  <button onclick="editTest('${num}')">Редагувати</button>
+                  <button class="delete-btn" onclick="deleteTest('${num}')">Видалити</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <button onclick="window.location.href='/admin'">Повернутися</button>
         <script>
-          async function saveTest(testNum) {
-            const testDiv = document.querySelector(\`.test[data-test-num="\${testNum}"]\`);
-            const name = testDiv.querySelector('input[data-field="name"]').value;
-            const timeLimit = testDiv.querySelector('input[data-field="timeLimit"]').value;
-            const questionsFile = testDiv.querySelector('input[data-field="questionsFile"]').value;
-
-            const response = await fetch('/admin/update-test', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ testNum, name, timeLimit: parseInt(timeLimit), questionsFile })
-            });
-            const result = await response.json();
-            if (result.success) {
-              alert('Тест успішно оновлено');
-            } else {
-              alert('Помилка при оновленні тесту: ' + result.message);
-            }
+          async function editTest(testNumber) {
+            window.location.href = '/admin/edit-test?testNumber=' + testNumber;
           }
 
-          async function deleteTest(testNum) {
-            if (confirm('Ви впевнені, що хочете видалити тест ' + testNum + '?')) {
+          async function deleteTest(testNumber) {
+            if (confirm('Ви впевнені, що хочете видалити тест ' + testNumber + '?')) {
               const response = await fetch('/admin/delete-test', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ testNum })
+                body: JSON.stringify({ testNumber })
               });
               const result = await response.json();
               if (result.success) {
-                document.querySelector(\`.test[data-test-num="\${testNum}"]\`).remove();
+                window.location.reload();
               } else {
                 alert('Помилка при видаленні тесту: ' + result.message);
               }
@@ -1676,301 +1826,321 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
     </html>
   `);
   logger.info(`GET /admin/edit-tests completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in GET /admin/edit-tests, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).send('Помилка сервера');
+}
 });
 
-app.post('/admin/update-test', checkAdmin, async (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling POST /admin/update-test');
+app.get('/admin/edit-test', checkAdmin, async (req, res) => {
+const startTime = Date.now();
+logger.info('Handling GET /admin/edit-test');
 
-  try {
-    const { testNum, name, timeLimit, questionsFile } = req.body;
-    if (!testNames[testNum]) {
-      logger.warn(`Test ${testNum} not found`);
-      return res.status(404).json({ success: false, message: 'Тест не знайдено' });
-    }
-    testNames[testNum] = { name, timeLimit: parseInt(timeLimit), questionsFile };
-    if (redisReady) {
-      await redis.set('testNames', JSON.stringify(testNames));
-    }
-    logger.info(`Test ${testNum} updated, took ${Date.now() - startTime}ms`);
-    res.json({ success: true, message: 'Тест успішно оновлено' });
-  } catch (error) {
-    logger.error(`Error in POST /admin/update-test, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    res.status(500).json({ success: false, message: 'Помилка при оновленні тесту' });
+try {
+  const { testNumber } = req.query;
+  if (!testNumber || !testNames[testNumber]) {
+    logger.warn(`Test ${testNumber} not found`);
+    return res.status(400).send('Тест не знайдено');
   }
+
+  const test = testNames[testNumber];
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Редагувати тест ${testNumber}</title>
+        <style>
+          body { font-size: 16px; margin: 20px; }
+          h1 { font-size: 24px; margin-bottom: 20px; }
+          form { display: flex; flex-direction: column; gap: 10px; max-width: 500px; }
+          label { margin-top: 10px; }
+          input, select { font-size: 16px; padding: 5px; width: 100%; box-sizing: border-box; }
+          button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; margin-top: 10px; }
+          button:hover { background-color: #0056b3; }
+          .error { color: red; margin-top: 10px; }
+        </style>
+      </head>
+      <body>
+        <h1>Редагувати тест ${testNumber}</h1>
+        <form action="/admin/edit-test" method="POST" enctype="multipart/form-data">
+          <input type="hidden" name="testNumber" value="${testNumber}">
+          <label>Назва тесту:</label>
+          <input type="text" name="testName" value="${test.name}" required>
+          <label>Ліміт часу (секунд):</label>
+          <input type="number" name="timeLimit" value="${test.timeLimit}" required>
+          <label>Новий файл з питаннями (.xlsx, залиште порожнім, якщо не змінюєте):</label>
+          <input type="file" name="questionsFile" accept=".xlsx">
+          <button type="submit">Зберегти зміни</button>
+        </form>
+        <button onclick="window.location.href='/admin/edit-tests'">Повернутися</button>
+      </body>
+    </html>
+  `);
+  logger.info(`GET /admin/edit-test completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in GET /admin/edit-test, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).send('Помилка сервера');
+}
+});
+
+app.post('/admin/edit-test', checkAdmin, upload.single('questionsFile'), async (req, res) => {
+const startTime = Date.now();
+logger.info('Handling POST /admin/edit-test');
+
+try {
+  const { testNumber, testName, timeLimit } = req.body;
+  const questionsFile = req.file;
+
+  if (!testNumber || !testName || !timeLimit || !testNames[testNumber]) {
+    logger.warn('Missing required fields or test not found in edit-test request');
+    return res.status(400).send('Усі поля обов’язкові або тест не знайдено');
+  }
+
+  const timeLimitNum = parseInt(timeLimit);
+  if (isNaN(timeLimitNum) || timeLimitNum <= 0) {
+    logger.warn('Invalid time limit provided');
+    return res.status(400).send('Ліміт часу має бути додатним числом');
+  }
+
+  const test = testNames[testNumber];
+  test.name = testName;
+  test.timeLimit = timeLimitNum;
+
+  if (questionsFile) {
+    // Загружаем новый файл в Vercel Blob Storage
+    const blobPath = `questions-${Date.now()}-${questionsFile.originalname}`;
+    const blob = await put(blobPath, fs.createReadStream(questionsFile.path), {
+      access: 'public',
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+    });
+
+    // Удаляем старый файл из Vercel Blob Storage (если возможно)
+    // Примечание: Vercel Blob Storage не предоставляет прямого метода удаления через API,
+    // поэтому это нужно делать вручную или через Vercel CLI.
+    logger.info(`Old questions file ${test.questionsFile} should be deleted manually from Vercel Blob Storage`);
+
+    test.questionsFile = blobPath;
+    fs.unlinkSync(questionsFile.path);
+  }
+
+  // Кэшируем обновленные testNames в Redis
+  if (redisReady) {
+    await redis.set('testNames', JSON.stringify(testNames));
+    logger.info('Updated testNames cached in Redis');
+  }
+
+  logger.info(`Test ${testNumber} updated successfully`);
+  res.redirect('/admin/edit-tests');
+  logger.info(`POST /admin/edit-test completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in POST /admin/edit-test, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).send('Помилка сервера');
+}
 });
 
 app.post('/admin/delete-test', checkAdmin, async (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling POST /admin/delete-test');
+const startTime = Date.now();
+logger.info('Handling POST /admin/delete-test');
 
-  try {
-    const { testNum } = req.body;
-    if (!testNames[testNum]) {
-      logger.warn(`Test ${testNum} not found`);
-      return res.status(404).json({ success: false, message: 'Тест не знайдено' });
-    }
-    delete testNames[testNum];
-    if (redisReady) {
-      await redis.set('testNames', JSON.stringify(testNames));
-    }
-    logger.info(`Test ${testNum} deleted, took ${Date.now() - startTime}ms`);
-    res.json({ success: true, message: 'Тест успішно видалено' });
-  } catch (error) {
-    logger.error(`Error in POST /admin/delete-test, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    res.status(500).json({ success: false, message: 'Помилка при видаленні тесту' });
+try {
+  const { testNumber } = req.body;
+  if (!testNumber || !testNames[testNumber]) {
+    logger.warn(`Test ${testNumber} not found`);
+    return res.status(400).json({ success: false, message: 'Тест не знайдено' });
   }
+
+  const test = testNames[testNumber];
+  // Удаляем файл из Vercel Blob Storage (примечание: нужно удалить вручную, так как API не поддерживает удаление)
+  logger.info(`Questions file ${test.questionsFile} should be deleted manually from Vercel Blob Storage`);
+
+  // Удаляем тест из testNames
+  delete testNames[testNumber];
+
+  // Пересчитываем номера тестов
+  const newTestNames = {};
+  Object.keys(testNames).sort((a, b) => parseInt(a) - parseInt(b)).forEach((key, index) => {
+    const newKey = String(index + 1);
+    newTestNames[newKey] = testNames[key];
+  });
+  testNames = newTestNames;
+
+  // Кэшируем обновленные testNames в Redis
+  if (redisReady) {
+    await redis.set('testNames', JSON.stringify(testNames));
+    logger.info('Updated testNames cached in Redis after deletion');
+  }
+
+  logger.info(`Test ${testNumber} deleted successfully`);
+  res.json({ success: true, message: 'Тест видалено' });
+  logger.info(`POST /admin/delete-test completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in POST /admin/delete-test, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).json({ success: false, message: 'Помилка сервера' });
+}
 });
 
-// Перегляд результатів тестів
-app.get('/admin/view-results', checkAdmin, async (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling GET /admin/view-results');
+// Загрузка пользователей
+app.get('/admin/upload-users', checkAdmin, async (req, res) => {
+const startTime = Date.now();
+logger.info('Handling GET /admin/upload-users');
 
-  try {
-    let results = [];
-    if (redisReady) {
-      results = await redis.lrange('test_results', 0, -1);
-    }
-    const parsedResults = results.map(r => JSON.parse(r));
+try {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Завантажити користувачів</title>
+        <style>
+          body { font-size: 16px; margin: 20px; }
+          h1 { font-size: 24px; margin-bottom: 20px; }
+          form { display: flex; flex-direction: column; gap: 10px; max-width: 500px; }
+          label { margin-top: 10px; }
+          input { font-size: 16px; padding: 5px; width: 100%; box-sizing: border-box; }
+          button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; margin-top: 10px; }
+          button:hover { background-color: #0056b3; }
+          .error { color: red; margin-top: 10px; }
+        </style>
+      </head>
+      <body>
+        <h1>Завантажити користувачів</h1>
+        <form action="/admin/upload-users" method="POST" enctype="multipart/form-data">
+          <label>Файл з користувачами (.xlsx):</label>
+          <input type="file" name="usersFile" accept=".xlsx" required>
+          <button type="submit">Завантажити</button>
+        </form>
+        <button onclick="window.location.href='/admin'">Повернутися</button>
+      </body>
+    </html>
+  `);
+  logger.info(`GET /admin/upload-users completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in GET /admin/upload-users, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).send('Помилка сервера');
+}
+});
 
-    const questionsByTest = {};
-    for (const result of parsedResults) {
-      const testNumber = result.testNumber;
-      if (!questionsByTest[testNumber]) {
-        try {
-          questionsByTest[testNumber] = await loadQuestions(testNames[testNumber].questionsFile);
-        } catch (error) {
-          logger.error(`Ошибка загрузки вопросов для теста ${testNumber}: ${error.message}`, { stack: error.stack });
-          questionsByTest[testNumber] = [];
-        }
-      }
-    }
+app.post('/admin/upload-users', checkAdmin, upload.single('usersFile'), async (req, res) => {
+const startTime = Date.now();
+logger.info('Handling POST /admin/upload-users');
 
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Перегляд результатів</title>
-          <style>
-            body { font-size: 16px; margin: 20px; }
-            h1 { font-size: 24px; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-            th { background-color: #f0f0f0; }
-            button { font-size: 16px; padding: 5px 10px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
-            button:hover { background-color: #0056b3; }
-            .answers { display: none; margin-top: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
-          </style>
-        </head>
-        <body>
-          <h1>Перегляд результатів тестів</h1>
-          <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-          <table>
-            <thead>
-              <tr>
-                <th>Користувач</th>
-                <th>Тест</th>
-                <th>Результат</th>
-                <th>Тривалість</th>
-                <th>Підозріла активність</th>
-                <th>Дата</th>
-                <th>Дії</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${parsedResults.map((result, idx) => `
-                <tr>
-                  <td>${result.user}</td>
-                  <td>${testNames[result.testNumber]?.name || 'Невідомий тест'}</td>
-                  <td>${result.score} / ${result.totalPoints}</td>
-                  <td>${formatDuration(result.duration)}</td>
-                  <td>${Math.round((result.suspiciousBehavior / (result.duration || 1)) * 100)}%</td>
-                  <td>${new Date(result.endTime).toLocaleString()}</td>
-                  <td>
-                    <button onclick="toggleAnswers(${idx})">Показати відповіді</button>
-                  </td>
-                </tr>
-                <tr>
-                  <td colspan="7">
-                    <div id="answers-${idx}" class="answers">
-                      ${Object.entries(result.answers).map(([qIdx, answer]) => {
-                        const question = questionsByTest[result.testNumber]?.[qIdx];
-                        if (!question) return `<p>Питання ${parseInt(qIdx) + 1}: Відповідь: ${answer} (Питання не знайдено)</p>`;
-                        const isCorrect = result.scoresPerQuestion[qIdx] > 0;
-                        return `
-                          <p>
-                            Питання ${parseInt(qIdx) + 1}: ${question.text}<br>
-                            Відповідь: ${Array.isArray(answer) ? answer.join(', ') : answer}<br>
-                            Правильна відповідь: ${question.correctAnswers.join(', ')}<br>
-                            Оцінка: ${result.scoresPerQuestion[qIdx]} / ${question.points} (${isCorrect ? 'Правильно' : 'Неправильно'})
-                          </p>
-                        `;
-                      }).join('')}
-                    </div>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          <script>
-            function toggleAnswers(index) {
-              const answersDiv = document.getElementById('answers-' + index);
-              answersDiv.style.display = answersDiv.style.display === 'block' ? 'none' : 'block';
-            }
-          </script>
-        </body>
-      </html>
-    `);
-    logger.info(`GET /admin/view-results completed, took ${Date.now() - startTime}ms`);
-  } catch (error) {
-    logger.error(`Error in GET /admin/view-results, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    res.status(500).send('Помилка сервера');
+try {
+  const usersFile = req.file;
+  if (!usersFile) {
+    logger.warn('No users file uploaded');
+    return res.status(400).send('Файл з користувачами обов’язковий');
   }
+
+  // Загружаем файл в Vercel Blob Storage
+  const blobPath = `users-${Date.now()}-${usersFile.originalname}`;
+  const blob = await put(blobPath, fs.createReadStream(usersFile.path), {
+    access: 'public',
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+  });
+
+  // Удаляем старые файлы пользователей из Vercel Blob Storage (примечание: нужно удалить вручную)
+  const blobs = await listVercelBlobs();
+  const oldUserFiles = blobs.filter(blob => blob.pathname.startsWith('users-') && blob.pathname !== blobPath);
+  oldUserFiles.forEach(file => {
+    logger.info(`Old users file ${file.pathname} should be deleted manually from Vercel Blob Storage`);
+  });
+
+  // Обновляем список пользователей
+  users = await loadUsers();
+  await initializePasswords();
+
+  // Удаляем временный файл
+  fs.unlinkSync(usersFile.path);
+
+  logger.info('Users uploaded and updated successfully');
+  res.redirect('/admin');
+  logger.info(`POST /admin/upload-users completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in POST /admin/upload-users, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).send('Помилка сервера');
+}
 });
 
 // Маршрут для выхода
 app.get('/logout', (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling GET /logout');
+const startTime = Date.now();
+logger.info('Handling GET /logout');
 
-  try {
-    res.clearCookie('auth');
-    res.clearCookie('savedPassword');
-    logger.info(`User logged out, took ${Date.now() - startTime}ms`);
-    res.redirect('/');
-  } catch (err) {
-    logger.error(`Error in GET /logout, took ${Date.now() - startTime}ms: ${err.message}`, { stack: err.stack });
-    res.status(500).send('Помилка сервера');
-  }
+try {
+  res.clearCookie('auth');
+  res.clearCookie('savedPassword');
+  logger.info('User logged out successfully');
+  res.redirect('/');
+  logger.info(`GET /logout completed, took ${Date.now() - startTime}ms`);
+} catch (error) {
+  logger.error(`Error in GET /logout, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+  res.status(500).send('Помилка сервера');
+}
 });
 
-// Обработка ошибок для несуществующих маршрутов
+// Обработка favicon.ico и favicon.png
+app.get('/favicon.ico', (req, res) => {
+res.status(204).end();
+});
+
+app.get('/favicon.png', (req, res) => {
+res.status(204).end();
+});
+
+// Обработка несуществующих маршрутов
 app.use((req, res) => {
-  const startTime = Date.now();
-  logger.warn(`404 Not Found: ${req.method} ${req.url}`);
-  res.status(404).send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>404 - Сторінка не знайдена</title>
-        <style>
-          body { font-size: 16px; margin: 20px; text-align: center; }
-          h1 { font-size: 24px; margin-bottom: 20px; }
-          button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
-          button:hover { background-color: #0056b3; }
-        </style>
-      </head>
-      <body>
-        <h1>404 - Сторінка не знайдена</h1>
-        <button onclick="window.location.href='/'">Повернутися на головну</button>
-      </body>
-    </html>
-  `);
-  logger.info(`404 response sent, took ${Date.now() - startTime}ms`);
+const startTime = Date.now();
+logger.warn(`404 Not Found: ${req.method} ${req.url}`);
+res.status(404).send(`
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>404 - Сторінка не знайдена</title>
+      <style>
+        body { font-size: 16px; margin: 20px; text-align: center; }
+        h1 { font-size: 24px; margin-bottom: 20px; }
+        button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+      </style>
+    </head>
+    <body>
+      <h1>404 - Сторінка не знайдена</h1>
+      <p>Сторінка, яку ви шукаєте, не існує.</p>
+      <button onclick="window.location.href='/'">Повернутися на головну</button>
+    </body>
+  </html>
+`);
+logger.info(`404 handler completed, took ${Date.now() - startTime}ms`);
 });
-
-// Обработка глобальных ошибок
-app.use((err, req, res, next) => {
-  const startTime = Date.now();
-  logger.error(`Unhandled error in ${req.method} ${req.url}: ${err.message}`, { stack: err.stack });
-  res.status(500).send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>500 - Помилка сервера</title>
-        <style>
-          body { font-size: 16px; margin: 20px; text-align: center; }
-          h1 { font-size: 24px; margin-bottom: 20px; }
-          button { font-size           16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
-          button:hover { background-color: #0056b3; }
-        </style>
-      </head>
-      <body>
-        <h1>500 - Помилка сервера</h1>
-        <p>Виникла помилка на сервері. Будь ласка, спробуйте ще раз пізніше.</p>
-        <button onclick="window.location.href='/'">Повернутися на головну</button>
-      </body>
-    </html>
-  `);
-  logger.info(`500 response sent, took ${Date.now() - startTime}ms`);
-});
-
-// Функция для graceful shutdown
-const gracefulShutdown = (server) => {
-  return async () => {
-    logger.info('Received shutdown signal. Initiating graceful shutdown...');
-    try {
-      // Закрываем соединение с Redis
-      if (redis) {
-        await redis.quit();
-        logger.info('Redis connection closed');
-      }
-
-      // Закрываем сервер
-      server.close(() => {
-        logger.info('HTTP server closed');
-        process.exit(0);
-      });
-
-      // Принудительное завершение через 10 секунд, если сервер не закроется
-      setTimeout(() => {
-        logger.error('Could not close connections in time, forcefully shutting down');
-        process.exit(1);
-      }, 10000);
-    } catch (error) {
-      logger.error('Error during graceful shutdown:', {
-        message: error.message,
-        stack: error.stack,
-      });
-      process.exit(1);
-    }
-  };
-};
 
 // Запуск сервера
+const PORT = process.env.PORT || 3000;
 const startServer = async () => {
-  const port = process.env.PORT || 3000;
-  let server;
-  try {
-    server = app.listen(port, () => {
-      logger.info(`Server is running on port ${port}`);
-    });
-
-    // Выполняем инициализацию в фоновом
-    initializeServer().catch((error) => {
-      logger.error('Background initialization failed:', { message: error.message, stack: error.stack });
-    });
-
-    const signals = ['SIGINT', 'SIGTERM'];
-    signals.forEach((signal) => {
-      process.on(signal, async () => {
-        logger.info(`Received ${signal}, shutting down...`);
-        if (server) {
-          server.close(() => {
-            logger.info('Server closed');
-            process.exit(0);
-          });
-        }
-        setTimeout(() => {
-          logger.error('Shutdown timed out, forcing exit');
-          process.exit(1);
-        }, 10000);
-      });
-    });
-  } catch (error) {
-    logger.error('Failed to start server:', { message: error.message, stack: error.stack });
-    process.exit(1);
-  }
+try {
+  await initializeServer();
+  app.listen(PORT, () => {
+    logger.info(`Server is running on port ${PORT}`);
+  });
+} catch (error) {
+  logger.error('Failed to start server:', { message: error.message, stack: error.stack });
+  process.exit(1);
+}
 };
 
-// Запускаем сервер
 startServer();
 
-module.exports = app;
+// Обработка непредвиденных ошибок
+process.on('uncaughtException', (error) => {
+logger.error('Uncaught Exception:', { message: error.message, stack: error.stack });
+process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+logger.error('Unhandled Rejection at:', { promise, reason: reason instanceof Error ? reason.message : reason, stack: reason instanceof Error ? reason.stack : undefined });
+process.exit(1);
+});

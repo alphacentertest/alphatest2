@@ -3,15 +3,11 @@ import * as tf from '@tensorflow/tfjs-core';
 import * as draw from './draw';
 import * as utils from './utils';
 
-export {
-  draw,
-  utils,
-  tf
-}
+export { draw, utils, tf };
 
 export * from './ageGenderNet/index';
 export * from './classes/index';
-export * from './dom/index'
+export * from './dom/index';
 export * from './env/index';
 export * from './faceExpressionNet/index';
 export * from './faceLandmarkNet/index';

@@ -7,12 +7,12 @@ export function detectSingleFace(
   input: TNetInput,
   options: FaceDetectionOptions = new SsdMobilenetv1Options()
 ): DetectSingleFaceTask {
-  return new DetectSingleFaceTask(input, options)
+  return new DetectSingleFaceTask(input, options);
 }
 
 export function detectAllFaces(
   input: TNetInput,
   options: FaceDetectionOptions = new SsdMobilenetv1Options()
 ): DetectAllFacesTask {
-  return new DetectAllFacesTask(input, options)
+  return new DetectAllFacesTask(input, options);
 }
