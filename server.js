@@ -164,27 +164,20 @@ app.get('/', (req, res) => {
 
 app.post('/login', async (req, res) => {
   try {
-    const { password } = req.body;
-    if (!password) return res.status(400).json({ success: false, message: 'Пароль не вказано' });
-    console.log('Checking password:', password, 'against validPasswords:', validPasswords);
-    const user = Object.keys(validPasswords).find(u => validPasswords[u] === password);
-    if (!user) return res.status(401).json({ success: false, message: 'Невірний пароль' });
+    const { username, password } = req.body;
+    console.log('Checking password:', username, 'against validPasswords');
 
-    res.cookie('auth', user, {
-      maxAge: 24 * 60 * 60 * 1000,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax'
-    });
-
-    if (user === 'admin') {
-      res.json({ success: true, redirect: '/admin' });
-    } else {
-      res.json({ success: true, redirect: '/select-test' });
+    const users = await loadUsersFromExcel();
+    const user = users.find(u => u.username === username && u.password === password);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Invalid username or password' });
     }
-  } catch (error) {
-    console.error('Ошибка в /login:', error.stack);
-    res.status(500).json({ success: false, message: 'Помилка сервера' });
+
+    // Редирект на главную страницу
+    res.redirect('/');
+  } catch (err) {
+    console.error('Error during login:', err);
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
   }
 });
 
