@@ -5,9 +5,10 @@ const ExcelJS = require('exceljs');
 const { createClient } = require('redis');
 const fs = require('fs');
 const cors = require('cors');
-app.use(cors());
 
 const app = express();
+
+app.use(cors());
 
 let validPasswords = {};
 let isInitialized = false;
