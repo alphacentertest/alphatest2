@@ -54,17 +54,12 @@ const redis = new Redis(process.env.REDIS_URL, {
   maxRetriesPerRequest: 5,
   retryStrategy(times) {
     const delay = Math.min(times * 500, 5000);
-    logger.info(
-      `Спроба підключення до Redis, спроба ${times}, затримка ${delay}мс`
-    );
+    logger.info(`Спроба підключення до Redis, спроба ${times}, затримка ${delay}мс`);
     if (times > 10) {
-      logger.warn(
-        'Не вдалося підключитися до Redis після 10 спроб. Продовжуємо без Redis.',
-        {
-          redisUrl: process.env.REDIS_URL,
-          status: redis.status,
-        }
-      );
+      logger.warn('Не вдалося підключитися до Redis після 10 спроб. Продовжуємо без Redis.', {
+        redisUrl: process.env.REDIS_URL,
+        status: redis.status,
+      });
       redisReady = false;
       return null;
     }
@@ -73,15 +68,11 @@ const redis = new Redis(process.env.REDIS_URL, {
   enableOfflineQueue: true,
   enableReadyCheck: true,
   keepAlive: 30000,
-  tls:
-    process.env.REDIS_URL &&
-    (process.env.REDIS_URL.includes('upstash.io') ||
-      process.env.REDIS_URL.includes('redis-cloud.com'))
-      ? {
-          minVersion: 'TLSv1.2',
-          rejectUnauthorized: process.env.NODE_ENV === 'production',
-        }
-      : undefined,
+  tls: {
+    minVersion: 'TLSv1.2', // Мінімальна версія TLS
+    rejectUnauthorized: true, // Відхиляємо несертифіковані з’єднання
+    checkServerIdentity: () => undefined, // Обходимо перевірку імені хоста для Upstash
+  },
 });
 
 // Обробники подій Redis
@@ -1143,6 +1134,34 @@ app.get('/select-test', checkAuth, async (req, res) => {
       { stack: err.stack }
     );
     res.status(500).send('Помилка сервера');
+  }
+});
+
+// Тестовий маршрут для перевірки Redis
+app.get('/test-redis', async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Обробка GET /test-redis');
+
+  try {
+    if (!redisReady) {
+      throw new Error('Redis недоступний');
+    }
+    await redis.set('test-key', 'test-value');
+    const value = await redis.get('test-key');
+    res.status(200).json({
+      status: 'OK',
+      redisStatus: 'Підключений',
+      testValue: value,
+      timestamp: new Date().toISOString(),
+    });
+    logger.info(`GET /test-redis завершено, тривалість ${Date.now() - startTime}мс`);
+  } catch (error) {
+    logger.error(`Помилка в GET /test-redis: ${error.message}`, { stack: error.stack });
+    res.status(500).json({
+      status: 'Помилка',
+      message: 'Не вдалося підключитися до Redis',
+      error: error.message,
+    });
   }
 });
 
