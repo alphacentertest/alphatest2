@@ -2,6 +2,7 @@ const express = require('express');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fsSync = require('fs');
+const session = require('express-session');
 
 const app = express();
 
@@ -12,9 +13,22 @@ app.use(express.json());
 // Статическая папка для изображений (если есть)
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Настройка сессий
+app.use(session({
+  secret: 'your-secret-key', // Замените на свой секретный ключ
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: false } // Для локального тестирования secure: false, на Vercel установите secure: true
+}));
+
+// Логирование всех запросов
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 // Глобальные переменные
 let users = [];
-let isAuthenticated = false; // Флаг авторизации
 
 // Загрузка пользователей из users.xlsx
 const loadUsers = async () => {
@@ -125,6 +139,12 @@ const initializeServer = async () => {
 
 // Главная страница (вход)
 app.get('/login', (req, res) => {
+  // Если пользователь уже авторизован, перенаправляем на /select-test
+  if (req.session.isAuthenticated) {
+    console.log('Пользователь уже авторизован, перенаправляем на /select-test');
+    return res.redirect('/select-test');
+  }
+
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -269,13 +289,13 @@ app.post('/login', async (req, res) => {
   }
 
   console.log(`Успешная авторизация для пользователя: ${user.username}`);
-  isAuthenticated = true; // Устанавливаем флаг авторизации
+  req.session.isAuthenticated = true; // Устанавливаем флаг авторизации в сессии
   res.redirect('/select-test');
 });
 
 // Middleware для проверки авторизации
 const checkAuth = (req, res, next) => {
-  if (!isAuthenticated) {
+  if (!req.session.isAuthenticated) {
     console.log('Неавторизованный доступ к /select-test');
     return res.redirect('/login?error=' + encodeURIComponent('Будь ласка, увійдіть'));
   }
@@ -332,6 +352,7 @@ app.get('/select-test', checkAuth, (req, res) => {
         <div class="tests">
           <button onclick="window.location.href='/test/1'">Тест 1</button>
           <button onclick="window.location.href='/test/2'">Тест 2</button>
+          <button onclick="window.location.href='/logout'">Вийти</button>
         </div>
       </body>
     </html>
@@ -439,6 +460,18 @@ app.get('/test/:testNumber', checkAuth, async (req, res) => {
       </body>
     </html>
   `);
+});
+
+// Маршрут для выхода
+app.get('/logout', (req, res) => {
+  req.session.destroy(err => {
+    if (err) {
+      console.error(`Ошибка при выходе: ${err.message}`);
+      return res.redirect('/select-test');
+    }
+    console.log('Пользователь вышел');
+    res.redirect('/login');
+  });
 });
 
 // Запуск сервера
