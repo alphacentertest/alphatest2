@@ -3,7 +3,8 @@ const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
-const fs = require('fs').promises; // Use promises for async file operations
+const fs = require('fs').promises; // Асинхронні методи fs
+const fsSync = require('fs'); // Синхронні методи fs
 const Redis = require('ioredis');
 const logger = require(path.join(__dirname, 'logger'));
 const AWS = require('aws-sdk');
@@ -13,12 +14,12 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const xss = require('xss');
-const csrf = require('csurf'); // Add CSRF protection
-const session = require('express-session'); // Add session management
-const RedisStore = require('connect-redis')(session); // Redis-backed sessions
+const csrf = require('csurf');
+const session = require('express-session');
+const RedisStore = require('connect-redis').default; // Новий синтаксис для connect-redis@7.x
 require('dotenv').config();
 
-// Validate required environment variables
+// Перевірка необхідних змінних середовища
 const requiredEnvVars = [
   'REDIS_URL',
   'BLOB_READ_WRITE_TOKEN',
@@ -27,17 +28,17 @@ const requiredEnvVars = [
   'AWS_REGION',
   'S3_BUCKET_NAME',
   'ADMIN_PASSWORD_HASH',
-  'SESSION_SECRET', // Add session secret for secure sessions
+  'SESSION_SECRET',
 ];
 
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
-    logger.error(`Missing required environment variable: ${envVar}`);
+    logger.error(`Відсутня необхідна змінна середовища: ${envVar}`);
     process.exit(1);
   }
 }
 
-// Initialize Express app
+// Ініціалізація Express додатку
 const app = express();
 
 // Node version endpoint
@@ -129,16 +130,16 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(helmet());
 
-// Session setup with Redis store
+// Налаштування сесій з Redis
 app.use(session({
-  store: new RedisStore({ client: redis }),
+  store: new RedisStore({ client: redis }), // Використовуємо RedisStore напряму
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    maxAge: 24 * 60 * 60 * 1000, // 24 години
     sameSite: 'lax',
   },
 }));
@@ -180,10 +181,10 @@ const loginLimiter = rateLimit({
 });
 app.use('/login', loginLimiter);
 
-// Multer setup for file uploads
+// Налаштування Multer для завантаження файлів
 const uploadDir = '/tmp/uploads';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+if (!fsSync.existsSync(uploadDir)) {
+  fsSync.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -467,31 +468,7 @@ const loadQuestions = async (questionsFile) => {
   }
 };
 
-// Camera mode management
-const getCameraMode = async () => {
-  if (redisReady) {
-    try {
-      const mode = await redis.get('cameraMode');
-      return mode === 'true';
-    } catch (error) {
-      logger.error(`Error getting camera mode from Redis: ${error.message}`, { stack: error.stack });
-      return false;
-    }
-  }
-  return false;
-};
-
-const setCameraMode = async (mode) => {
-  if (redisReady) {
-    try {
-      await redis.set('cameraMode', String(mode));
-    } catch (error) {
-      logger.error(`Error setting camera mode in Redis: ${error.message}`, { stack: error.stack });
-    }
-  }
-};
-
-// User test data management with Redis pipeline for performance
+// User test data management with Redis
 const getUserTest = async (user) => {
   if (!redisReady) {
     logger.warn('Redis unavailable, cannot get user test');
@@ -530,7 +507,7 @@ const deleteUserTest = async (user) => {
   }
 };
 
-// Save test result with Redis pipeline
+// Save test result with Redis
 const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousBehavior, answers, questions) => {
   if (!redisReady) {
     logger.warn('Redis unavailable, skipping result save');
@@ -1034,7 +1011,7 @@ app.get('/test/start', checkAuth, async (req, res) => {
   }
 });
 
-// Question page
+// Question page with suspicious activity tracking
 app.get('/test/question', checkAuth, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /test/question');
@@ -1064,8 +1041,6 @@ app.get('/test/question', checkAuth, async (req, res) => {
 
     const minutes = Math.floor(timeRemaining / 1000 / 60);
     const seconds = Math.floor((timeRemaining / 1000) % 60);
-
-    const cameraEnabled = await getCameraMode();
 
     res.send(`
       <!DOCTYPE html>
@@ -1286,6 +1261,33 @@ app.get('/test/question', checkAuth, async (req, res) => {
                 });
               });
             });
+
+            // Track suspicious activity (tab switching or window minimizing)
+            let hasReported = false; // Prevent multiple reports in quick succession
+            document.addEventListener('visibilitychange', () => {
+              if (document.visibilityState === 'hidden' && !hasReported) {
+                hasReported = true;
+                fetch('/report-suspicious', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': '${req.csrfToken()}'
+                  },
+                })
+                .then(response => response.json())
+                .then(data => {
+                  if (!data.success) {
+                    console.error('Failed to report suspicious activity:', data.message);
+                  }
+                })
+                .catch(error => {
+                  console.error('Error reporting suspicious activity:', error);
+                })
+                .finally(() => {
+                  setTimeout(() => { hasReported = false; }, 5000); // Allow reporting again after 5 seconds
+                });
+              }
+            });
           </script>
         </body>
       </html>
@@ -1477,7 +1479,7 @@ app.get('/test/finish', checkAuth, async (req, res) => {
   }
 });
 
-// Admin panel
+// Admin panel (without camera toggle)
 app.get('/admin', checkAdmin, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /admin');
@@ -1530,7 +1532,6 @@ app.get('/admin', checkAdmin, async (req, res) => {
             <button onclick="window.location.href='/admin/edit-tests'">Редагувати тести</button>
             <button onclick="window.location.href='/admin/view-results'">Перегляд результатів тестів</button>
             <button onclick="deleteResults()">Видалити результати тестів</button>
-            <button onclick="toggleCamera()">Камера: ${await getCameraMode() ? 'Вимкнути' : 'Увімкнути'}</button>
             <button onclick="window.location.href='/logout'">Вийти</button>
           </div>
           <h2>Результати тестів</h2>
@@ -1597,19 +1598,6 @@ app.get('/admin', checkAdmin, async (req, res) => {
               }
             }
 
-            async function toggleCamera() {
-              const response = await fetch('/admin/toggle-camera', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '${req.csrfToken()}' }
-              });
-              const result = await response.json();
-              if (result.success) {
-                window.location.reload();
-              } else {
-                alert('Помилка при зміні стану камери: ' + result.message);
-              }
-            }
-
             function toggleAnswers(index) {
               const answersDiv = document.getElementById('answers-' + index);
               answersDiv.style.display = answersDiv.style.display === 'block' ? 'none' : 'block';
@@ -1638,21 +1626,6 @@ app.post('/admin/delete-results', checkAdmin, async (req, res) => {
   } catch (error) {
     logger.error(`Error in POST /admin/delete-results, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Помилка при видаленні результатів' });
-  }
-});
-
-app.post('/admin/toggle-camera', checkAdmin, async (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling POST /admin/toggle-camera');
-
-  try {
-    const currentMode = await getCameraMode();
-    await setCameraMode(!currentMode);
-    logger.info(`Camera mode toggled to ${!currentMode}, took ${Date.now() - startTime}ms`);
-    res.json({ success: true, message: `Камера ${!currentMode ? 'увімкнена' : 'вимкнена'}` });
-  } catch (error) {
-    logger.error(`Error in POST /admin/toggle-camera, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    res.status(500).json({ success: false, message: 'Помилка при зміні стану камери' });
   }
 });
 
@@ -1918,7 +1891,7 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
     const parsedResults = results.map(r => JSON.parse(r));
 
     const questionsByTest = {};
-    for (const result of parsedResults) {
+    for (const result     of parsedResults) {
       const testNumber = result.testNumber;
       if (!questionsByTest[testNumber]) {
         try {
@@ -2072,13 +2045,15 @@ app.use((err, req, res, next) => {
         <style>
           body { font-size: 16px; margin: 20px; text-align: center; }
           h1 { font-size: 24px; margin-bottom: 20px; }
+          p { margin-bottom: 20px; }
           button { font-size: 16px; padding: 10px 20px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
           button:hover { background-color: #0056b3; }
         </style>
       </head>
       <body>
         <h1>Помилка сервера</h1>
-        <p>Виникла помилка на сервері. Спробуйте ще раз пізніше.</p>
+        <p>Виникла помилка на сервері: ${xss(err.message)}</p>
+        <p>Спробуйте ще раз пізніше або зверніться до адміністратора.</p>
         <button onclick="window.location.href='/'">Повернутися на головну</button>
       </body>
     </html>
@@ -2101,8 +2076,10 @@ app.listen(PORT, async () => {
 const shutdown = async () => {
   logger.info('Received shutdown signal, closing server...');
   try {
-    await redis.quit();
-    logger.info('Redis connection closed');
+    if (redisReady) {
+      await redis.quit();
+      logger.info('Redis connection closed');
+    }
   } catch (error) {
     logger.error(`Error closing Redis connection: ${error.message}`, { stack: error.stack });
   }
