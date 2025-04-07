@@ -3,7 +3,7 @@ const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
-const fs = require('fs');
+const fs = require('fs').promises; // Use promises for async file operations
 const Redis = require('ioredis');
 const logger = require(path.join(__dirname, 'logger'));
 const AWS = require('aws-sdk');
@@ -13,9 +13,12 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const xss = require('xss');
+const csrf = require('csurf'); // Add CSRF protection
+const session = require('express-session'); // Add session management
+const RedisStore = require('connect-redis')(session); // Redis-backed sessions
 require('dotenv').config();
 
-// Проверка обязательных переменных окружения
+// Validate required environment variables
 const requiredEnvVars = [
   'REDIS_URL',
   'BLOB_READ_WRITE_TOKEN',
@@ -24,6 +27,7 @@ const requiredEnvVars = [
   'AWS_REGION',
   'S3_BUCKET_NAME',
   'ADMIN_PASSWORD_HASH',
+  'SESSION_SECRET', // Add session secret for secure sessions
 ];
 
 for (const envVar of requiredEnvVars) {
@@ -33,14 +37,15 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
-// Инициализация приложения
+// Initialize Express app
 const app = express();
 
+// Node version endpoint
 app.get('/node-version', (req, res) => {
   res.send(`Node.js version: ${process.version}`);
 });
 
-// Настройка Redis с улучшенной обработкой TLS
+// Redis setup with improved TLS handling
 let redisReady = false;
 const redis = new Redis(process.env.REDIS_URL, {
   connectTimeout: 20000,
@@ -69,6 +74,7 @@ const redis = new Redis(process.env.REDIS_URL, {
     : undefined,
 });
 
+// Redis event handlers
 redis.on('connect', () => {
   logger.info('Redis connected successfully');
 });
@@ -99,23 +105,23 @@ redis.on('end', () => {
   logger.warn('Redis connection closed');
 });
 
-// Настройка AWS S3
+// AWS S3 setup
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: process.env.AWS_REGION,
 });
 
-// Базовый URL для Vercel Blob Storage
+// Base URL for Vercel Blob Storage
 const BLOB_BASE_URL = process.env.BLOB_BASE_URL || 'https://qqeygegbb01p35fz.public.blob.vercel-storage.com';
 
-// Функция для загрузки node-fetch с помощью динамического импорта
+// Dynamic import for node-fetch
 const getFetch = async () => {
   const { default: fetch } = await import('node-fetch');
   return fetch;
 };
 
-// Настройка middleware
+// Middleware setup
 app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -123,19 +129,37 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(helmet());
 
-// Логирование всех запросов и фильтрация XSS
+// Session setup with Redis store
+app.use(session({
+  store: new RedisStore({ client: redis }),
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: 'lax',
+  },
+}));
+
+// CSRF protection
+const csrfProtection = csrf({ cookie: true });
+app.use(csrfProtection);
+
+// Request logging and XSS filtering
 app.use((req, res, next) => {
   const startTime = Date.now();
   logger.info(`${req.method} ${req.url} - IP: ${req.ip}`);
 
-  // Фильтрация query параметров
+  // XSS filtering for query parameters
   for (const key in req.query) {
     if (typeof req.query[key] === 'string') {
       req.query[key] = xss(req.query[key]);
     }
   }
 
-  // Фильтрация body параметров
+  // XSS filtering for body parameters
   for (const key in req.body) {
     if (typeof req.body[key] === 'string') {
       req.body[key] = xss(req.body[key]);
@@ -148,7 +172,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Настройка ограничения скорости для маршрута логина
+// Rate limiting for login route
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -156,7 +180,7 @@ const loginLimiter = rateLimit({
 });
 app.use('/login', loginLimiter);
 
-// Настройка multer для загрузки файлов
+// Multer setup for file uploads
 const uploadDir = '/tmp/uploads';
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -173,14 +197,14 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Глобальные переменные
+// Global variables
 let validPasswords = {};
 let users = [];
 let isInitialized = false;
 let testNames = {};
-let questionsByTestCache = {}; // Кэш для вопросов
+let questionsByTestCache = {};
 
-// Middleware для проверки инициализации
+// Middleware to ensure server initialization
 const ensureInitialized = (req, res, next) => {
   if (!isInitialized) {
     logger.warn('Server is not initialized, rejecting request');
@@ -192,7 +216,7 @@ const ensureInitialized = (req, res, next) => {
   next();
 };
 
-// Применяем middleware ко всем маршрутам, кроме /node-version, /, /favicon.ico и /favicon.png
+// Apply initialization middleware to all routes except specific ones
 app.use((req, res, next) => {
   if (req.path === '/node-version' || req.path === '/' || req.path === '/favicon.ico' || req.path === '/favicon.png') {
     return next();
@@ -200,7 +224,7 @@ app.use((req, res, next) => {
   ensureInitialized(req, res, next);
 });
 
-// Функция форматирования времени
+// Utility function to format duration
 const formatDuration = (seconds) => {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -208,7 +232,7 @@ const formatDuration = (seconds) => {
   return `${hours > 0 ? hours + ' год ' : ''}${minutes > 0 ? minutes + ' хв ' : ''}${secs} с`;
 };
 
-// Функция для получения списка файлов из Vercel Blob Storage
+// List files from Vercel Blob Storage
 const listVercelBlobs = async () => {
   try {
     logger.info('Attempting to list blobs from Vercel Blob Storage');
@@ -230,7 +254,7 @@ const listVercelBlobs = async () => {
   }
 };
 
-// Загрузка testNames динамически
+// Load test names dynamically
 const loadTestNames = async () => {
   const startTime = Date.now();
   logger.info('Loading test names dynamically');
@@ -265,7 +289,7 @@ const loadTestNames = async () => {
   }
 };
 
-// Загрузка пользователей из Vercel Blob Storage
+// Load users from Vercel Blob Storage
 const loadUsers = async () => {
   const startTime = Date.now();
   const cacheKey = 'users';
@@ -346,13 +370,12 @@ const loadUsers = async () => {
   }
 };
 
-// Загрузка вопросов для теста с кэшированием
+// Load questions for a test with caching
 const loadQuestions = async (questionsFile) => {
   const startTime = Date.now();
   const cacheKey = `questions:${questionsFile}`;
   logger.info(`Loading questions for ${questionsFile}`);
 
-  // Проверяем кэш на уровне приложения
   if (questionsByTestCache[questionsFile]) {
     logger.info(`Loaded ${questionsFile} from application cache, took ${Date.now() - startTime}ms`);
     return questionsByTestCache[questionsFile];
@@ -365,7 +388,7 @@ const loadQuestions = async (questionsFile) => {
         if (cachedQuestions) {
           logger.info(`Loaded ${questionsFile} from Redis cache, took ${Date.now() - startTime}ms`);
           const questions = JSON.parse(cachedQuestions);
-          questionsByTestCache[questionsFile] = questions; // Сохраняем в кэш приложения
+          questionsByTestCache[questionsFile] = questions;
           return questions;
         }
       } catch (redisError) {
@@ -435,7 +458,6 @@ const loadQuestions = async (questionsFile) => {
       }
     }
 
-    // Сохраняем в кэш приложения
     questionsByTestCache[questionsFile] = questions;
     logger.info(`Loaded ${questions.length} questions from ${questionsFile}, took ${Date.now() - startTime}ms`);
     return questions;
@@ -445,43 +467,70 @@ const loadQuestions = async (questionsFile) => {
   }
 };
 
-// Получение и установка режима камеры
+// Camera mode management
 const getCameraMode = async () => {
   if (redisReady) {
-    const mode = await redis.get('cameraMode');
-    return mode === 'true';
+    try {
+      const mode = await redis.get('cameraMode');
+      return mode === 'true';
+    } catch (error) {
+      logger.error(`Error getting camera mode from Redis: ${error.message}`, { stack: error.stack });
+      return false;
+    }
   }
   return false;
 };
 
 const setCameraMode = async (mode) => {
   if (redisReady) {
-    await redis.set('cameraMode', String(mode));
+    try {
+      await redis.set('cameraMode', String(mode));
+    } catch (error) {
+      logger.error(`Error setting camera mode in Redis: ${error.message}`, { stack: error.stack });
+    }
   }
 };
 
-// Получение и установка данных теста пользователя
+// User test data management with Redis pipeline for performance
 const getUserTest = async (user) => {
-  if (redisReady) {
+  if (!redisReady) {
+    logger.warn('Redis unavailable, cannot get user test');
+    return null;
+  }
+  try {
     const testData = await redis.hget('userTests', user);
     return testData ? JSON.parse(testData) : null;
+  } catch (error) {
+    logger.error(`Error getting user test from Redis: ${error.message}`, { stack: error.stack });
+    return null;
   }
-  return null;
 };
 
 const setUserTest = async (user, testData) => {
-  if (redisReady) {
+  if (!redisReady) {
+    logger.warn('Redis unavailable, cannot set user test');
+    return;
+  }
+  try {
     await redis.hset('userTests', user, JSON.stringify(testData));
+  } catch (error) {
+    logger.error(`Error setting user test in Redis: ${error.message}`, { stack: error.stack });
   }
 };
 
 const deleteUserTest = async (user) => {
-  if (redisReady) {
+  if (!redisReady) {
+    logger.warn('Redis unavailable, cannot delete user test');
+    return;
+  }
+  try {
     await redis.hdel('userTests', user);
+  } catch (error) {
+    logger.error(`Error deleting user test from Redis: ${error.message}`, { stack: error.stack });
   }
 };
 
-// Сохранение результата теста
+// Save test result with Redis pipeline
 const saveResult = async (user, testNumber, score, totalPoints, startTime, endTime, suspiciousBehavior, answers, questions) => {
   if (!redisReady) {
     logger.warn('Redis unavailable, skipping result save');
@@ -519,40 +568,40 @@ const saveResult = async (user, testNumber, score, totalPoints, startTime, endTi
       return 0;
     }),
   };
-  await redis.rpush('test_results', JSON.stringify(result));
+  try {
+    await redis.rpush('test_results', JSON.stringify(result));
+  } catch (error) {
+    logger.error(`Error saving test result to Redis: ${error.message}`, { stack: error.stack });
+  }
 };
 
-// Проверка авторизации
+// Authentication middleware using session
 const checkAuth = (req, res, next) => {
-  const user = req.cookies.auth;
-  if (!user) {
+  if (!req.session.user) {
     logger.warn('Unauthorized access attempt');
     return res.redirect('/');
   }
-  req.user = user;
+  req.user = req.session.user;
   next();
 };
 
-// Проверка админ-доступа
+// Admin authentication middleware using session
 const checkAdmin = (req, res, next) => {
-  const user = req.cookies.auth;
-  if (user !== 'admin') {
-    logger.warn(`Unauthorized admin access attempt by user: ${user}`);
+  if (!req.session.user || req.session.user !== 'admin') {
+    logger.warn(`Unauthorized admin access attempt by user: ${req.session.user || 'unknown'}`);
     return res.status(403).send('Доступ заборонено. Тільки для адміністратора.');
   }
-  req.user = user;
+  req.user = req.session.user;
   next();
 };
 
-// Инициализация паролей
+// Initialize passwords
 const initializePasswords = async () => {
   logger.info('Initializing passwords...');
   validPasswords = {};
 
-  // Добавляем пароль администратора
   validPasswords['admin'] = process.env.ADMIN_PASSWORD_HASH;
 
-  // Добавляем пароли пользователей
   users.forEach(user => {
     validPasswords[user.username] = user.password;
   });
@@ -560,7 +609,7 @@ const initializePasswords = async () => {
   logger.info(`Initialized passwords for ${Object.keys(validPasswords).length} users`);
 };
 
-// Инициализация сервера
+// Server initialization
 const initializeServer = async () => {
   logger.info('Starting server initialization...');
   logger.info('Checking environment variables...');
@@ -582,18 +631,33 @@ const initializeServer = async () => {
 
   logger.info('Loading test names...');
   try {
-    const testNamesData = await redis.get('testNames');
-    if (testNamesData) {
-      testNames = JSON.parse(testNamesData);
+    if (redisReady) {
+      const testNamesData = await redis.get('testNames');
+      if (testNamesData) {
+        testNames = JSON.parse(testNamesData);
+      } else {
+        await loadTestNames();
+      }
+    } else {
+      await loadTestNames();
     }
   } catch (error) {
-    logger.error('Failed to load test names from Redis:', { message: error.message, stack: error.stack });
+    logger.error('Failed to load test names:', { message: error.message, stack: error.stack });
+  }
+
+  logger.info('Loading users...');
+  try {
+    users = await loadUsers();
+    await initializePasswords();
+  } catch (error) {
+    logger.error('Failed to load users:', { message: error.message, stack: error.stack });
   }
 
   logger.info('Server initialization complete');
+  isInitialized = true;
 };
 
-// Главная страница (вход)
+// Main page (login)
 app.get('/', async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /');
@@ -624,10 +688,9 @@ app.get('/', async (req, res) => {
       `);
     }
 
-    const user = req.cookies.auth;
-    if (user) {
+    if (req.session.user) {
       logger.info(`User already authenticated, redirecting, took ${Date.now() - startTime}ms`);
-      return res.redirect(user === 'admin' ? '/admin' : '/select-test');
+      return res.redirect(req.session.user === 'admin' ? '/admin' : '/select-test');
     }
 
     const savedPassword = req.cookies.savedPassword || '';
@@ -698,6 +761,7 @@ app.get('/', async (req, res) => {
               color: red;
               margin-top: 10px;
               text-align: center;
+              font-size: 14px;
             }
             .password-container {
               position: relative;
@@ -715,6 +779,7 @@ app.get('/', async (req, res) => {
           <div class="container">
             <h1>Вхід</h1>
             <form action="/login" method="POST">
+              <input type="hidden" name="_csrf" value="${req.csrfToken()}">
               <label>Пароль:</label>
               <div class="password-container">
                 <input type="password" id="password" name="password" value="${savedPassword}" required>
@@ -737,6 +802,13 @@ app.get('/', async (req, res) => {
                 eyeIcon.textContent = '👁️';
               }
             }
+
+            // Display error message if redirected back with an error
+            const urlParams = new URLSearchParams(window.location.search);
+            const error = urlParams.get('error');
+            if (error) {
+              document.getElementById('error').textContent = decodeURIComponent(error);
+            }
           </script>
         </body>
       </html>
@@ -747,7 +819,7 @@ app.get('/', async (req, res) => {
   }
 });
 
-// Обработка входа
+// Handle login
 app.post(
   '/login',
   [
@@ -766,13 +838,13 @@ app.post(
     try {
       if (!isInitialized) {
         logger.warn('Server not initialized during login attempt');
-        return res.status(503).json({ success: false, message: 'Сервер не инициализирован. Спробуйте пізніше.' });
+        return res.redirect('/?error=' + encodeURIComponent('Сервер не инициализирован. Спробуйте пізніше.'));
       }
 
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         logger.warn('Validation errors:', errors.array());
-        return res.status(400).json({ success: false, message: errors.array()[0].msg });
+        return res.redirect('/?error=' + encodeURIComponent(errors.array()[0].msg));
       }
 
       const { password, rememberMe } = req.body;
@@ -789,15 +861,10 @@ app.post(
 
       if (!authenticatedUser) {
         logger.warn(`Failed login attempt with password`);
-        return res.status(401).json({ success: false, message: 'Невірний пароль' });
+        return res.redirect('/?error=' + encodeURIComponent('Невірний пароль'));
       }
 
-      res.cookie('auth', authenticatedUser, {
-        maxAge: 24 * 60 * 60 * 1000,
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-      });
+      req.session.user = authenticatedUser;
 
       if (rememberMe) {
         res.cookie('savedPassword', password, {
@@ -811,18 +878,15 @@ app.post(
       }
 
       logger.info(`Successful login for user: ${authenticatedUser}, took ${Date.now() - startTime}ms`);
-      if (authenticatedUser === 'admin') {
-        res.json({ success: true, redirect: '/admin' });
-      } else {
-        res.json({ success: true, redirect: '/select-test' });
-      }
+      res.redirect(authenticatedUser === 'admin' ? '/admin' : '/select-test');
     } catch (error) {
       logger.error(`Error during login, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-      res.status(500).json({ success: false, message: 'Помилка сервера' });
+      res.redirect('/?error=' + encodeURIComponent('Помилка сервера'));
     }
   }
 );
 
+// Health check endpoint
 app.get('/health', async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /health');
@@ -854,7 +918,7 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Выбор теста
+// Select test page
 app.get('/select-test', checkAuth, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /select-test');
@@ -935,7 +999,7 @@ app.get('/select-test', checkAuth, async (req, res) => {
   }
 });
 
-// Начало теста
+// Start test
 app.get('/test/start', checkAuth, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /test/start');
@@ -970,7 +1034,7 @@ app.get('/test/start', checkAuth, async (req, res) => {
   }
 });
 
-// Страница вопроса
+// Question page
 app.get('/test/question', checkAuth, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /test/question');
@@ -1146,6 +1210,7 @@ app.get('/test/question', checkAuth, async (req, res) => {
           ${q.picture ? `<img src="${q.picture}" alt="Question Image" onerror="this.src='/images/placeholder.png'">` : ''}
           <div class="question">${q.text}</div>
           <form id="questionForm" method="POST" action="/test/save-answer">
+            <input type="hidden" name="_csrf" value="${req.csrfToken()}">
             <input type="hidden" name="index" value="${index}">
             <div class="options" id="options">
               ${q.options && q.options.length > 0 ? q.options.map((option, i) => {
@@ -1232,7 +1297,7 @@ app.get('/test/question', checkAuth, async (req, res) => {
   }
 });
 
-// Сохранение ответа
+// Save answer
 app.post('/test/save-answer', checkAuth, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling POST /test/save-answer');
@@ -1285,7 +1350,7 @@ app.post('/test/save-answer', checkAuth, async (req, res) => {
   }
 });
 
-// Завершение теста
+// Finish test
 app.get('/test/finish', checkAuth, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /test/finish');
@@ -1412,7 +1477,7 @@ app.get('/test/finish', checkAuth, async (req, res) => {
   }
 });
 
-// Маршрут админ-панели
+// Admin panel
 app.get('/admin', checkAdmin, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /admin');
@@ -1521,7 +1586,7 @@ app.get('/admin', checkAdmin, async (req, res) => {
               if (confirm('Ви впевнені, що хочете видалити всі результати тестів?')) {
                 const response = await fetch('/admin/delete-results', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' }
+                  headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '${req.csrfToken()}' }
                 });
                 const result = await response.json();
                 if (result.success) {
@@ -1535,7 +1600,7 @@ app.get('/admin', checkAdmin, async (req, res) => {
             async function toggleCamera() {
               const response = await fetch('/admin/toggle-camera', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '${req.csrfToken()}' }
               });
               const result = await response.json();
               if (result.success) {
@@ -1591,7 +1656,7 @@ app.post('/admin/toggle-camera', checkAdmin, async (req, res) => {
   }
 });
 
-// Страница создания теста
+// Create test page
 app.get('/admin/create-test', checkAdmin, (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /admin/create-test');
@@ -1616,6 +1681,7 @@ app.get('/admin/create-test', checkAdmin, (req, res) => {
       <body>
         <h1>Створити тест</h1>
         <form id="createTestForm" enctype="multipart/form-data" method="POST" action="/admin/create-test">
+          <input type="hidden" name="_csrf" value="${req.csrfToken()}">
           <input type="text" name="testName" placeholder="Назва тесту" required>
           <input type="number" name="timeLimit" placeholder="Ліміт часу (сек)" required>
           <input type="file" name="questionsFile" accept=".xlsx" required>
@@ -1629,7 +1695,7 @@ app.get('/admin/create-test', checkAdmin, (req, res) => {
   logger.info(`GET /admin/create-test completed, took ${Date.now() - startTime}ms`);
 });
 
-// Обработка создания теста
+// Handle test creation
 app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling POST /admin/create-test');
@@ -1648,18 +1714,23 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
 
     let blob;
     try {
-      const fileBuffer = await fs.promises.readFile(file.path); // Use async readFile
+      const fileBuffer = await fs.readFile(file.path);
       blob = await put(questionsFileName, fileBuffer, { access: 'public', token: process.env.BLOB_READ_WRITE_TOKEN });
     } catch (blobError) {
       logger.error('Ошибка при загрузке в Vercel Blob:', blobError);
       throw new Error('Не удалось загрузить файл в хранилище');
+    } finally {
+      try {
+        await fs.unlink(file.path);
+      } catch (unlinkError) {
+        logger.error(`Error deleting uploaded file: ${unlinkError.message}`, { stack: unlinkError.stack });
+      }
     }
 
     testNames[newTestNumber] = { name: testName, timeLimit: parseInt(timeLimit), questionsFile: questionsFileName };
     if (redisReady) {
       await redis.set('testNames', JSON.stringify(testNames));
     }
-    await fs.promises.unlink(file.path); // Use async unlink
 
     logger.info(`Test ${newTestNumber} created, took ${Date.now() - startTime}ms`);
     res.redirect('/admin');
@@ -1669,7 +1740,7 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
   }
 });
 
-// Страница редактирования тестов
+// Edit tests page
 app.get('/admin/edit-tests', checkAdmin, (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /admin/edit-tests');
@@ -1718,7 +1789,7 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
 
             const response = await fetch('/admin/update-test', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '${req.csrfToken()}' },
               body: JSON.stringify({ testNum, name, timeLimit: parseInt(timeLimit), questionsFile })
             });
             const result = await response.json();
@@ -1733,7 +1804,7 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
             if (confirm('Ви впевнені, що хочете видалити тест ' + testNum + '?')) {
               const response = await fetch('/admin/delete-test', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '${req.csrfToken()}' },
                 body: JSON.stringify({ testNum })
               });
               const result = await response.json();
@@ -1784,7 +1855,7 @@ app.post('/admin/delete-test', checkAdmin, async (req, res) => {
   try {
     const { testNum } = req.body;
     if (!testNum) {
-      logger.warn('Missing  testNum for deletion');
+      logger.warn('Missing testNum for deletion');
       return res.status(400).json({ success: false, message: 'Номер тесту є обов’язковим' });
     }
 
@@ -1793,16 +1864,13 @@ app.post('/admin/delete-test', checkAdmin, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Тест не знайдено' });
     }
 
-    // Удаляем тест из testNames
     const questionsFile = testNames[testNum].questionsFile;
     delete testNames[testNum];
 
-    // Обновляем testNames в Redis
     if (redisReady) {
       await redis.set('testNames', JSON.stringify(testNames));
     }
 
-    // Удаляем файл вопросов из Vercel Blob Storage
     try {
       const blobs = await listVercelBlobs();
       const blobToDelete = blobs.find(blob => blob.pathname === questionsFile);
@@ -1819,7 +1887,6 @@ app.post('/admin/delete-test', checkAdmin, async (req, res) => {
       logger.error(`Failed to delete questions file ${questionsFile} from Vercel Blob Storage: ${blobError.message}`, { stack: blobError.stack });
     }
 
-    // Удаляем кэш вопросов
     delete questionsByTestCache[questionsFile];
 
     logger.info(`Test ${testNum} deleted, took ${Date.now() - startTime}ms`);
@@ -1830,7 +1897,7 @@ app.post('/admin/delete-test', checkAdmin, async (req, res) => {
   }
 });
 
-// Просмотр результатов тестов
+// View test results
 app.get('/admin/view-results', checkAdmin, async (req, res) => {
   const startTime = Date.now();
   logger.info('Handling GET /admin/view-results');
@@ -1838,55 +1905,30 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
   try {
     let results = [];
     if (redisReady) {
-      results = await redis.lrange('test_results', 0, -1);
+      try {
+        results = await redis.lrange('test_results', 0, -1);
+      } catch (redisError) {
+        logger.error(`Error fetching test results from Redis: ${redisError.message}`, { stack: redisError.stack });
+        return res.status(500).send('Помилка при отриманні результатів тестів');
+      }
+    } else {
+      logger.warn('Redis unavailable, cannot fetch test results');
     }
+
     const parsedResults = results.map(r => JSON.parse(r));
 
     const questionsByTest = {};
     for (const result of parsedResults) {
       const testNumber = result.testNumber;
-      if (!questionsByTest[testNumber] && testNames[testNumber]) {
+      if (!questionsByTest[testNumber]) {
         try {
           questionsByTest[testNumber] = await loadQuestions(testNames[testNumber].questionsFile);
         } catch (error) {
-          logger.error(`Ошибка загрузки вопросов для теста ${testNumber}: ${error.message}`, { stack: error.stack });
+          logger.error(`Error loading questions for test ${testNumber}: ${error.message}`, { stack: error.stack });
           questionsByTest[testNumber] = [];
         }
       }
     }
-
-    // Фильтрация и сортировка
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const userFilter = req.query.user || '';
-    const testFilter = req.query.test || '';
-    const sortBy = req.query.sortBy || 'endTime';
-    const sortOrder = req.query.sortOrder || 'desc';
-
-    let filteredResults = parsedResults.filter(result => {
-      const matchesUser = userFilter ? result.user.toLowerCase().includes(userFilter.toLowerCase()) : true;
-      const matchesTest = testFilter ? (testNames[result.testNumber]?.name || '').toLowerCase().includes(testFilter.toLowerCase()) : true;
-      return matchesUser && matchesTest;
-    });
-
-    filteredResults.sort((a, b) => {
-      let valA = a[sortBy];
-      let valB = b[sortBy];
-      if (sortBy === 'endTime') {
-        valA = new Date(valA).getTime();
-        valB = new Date(valB).getTime();
-      }
-      if (sortOrder === 'asc') {
-        return valA > valB ? 1 : -1;
-      }
-      return valA < valB ? 1 : -1;
-    });
-
-    const totalItems = filteredResults.length;
-    const totalPages = Math.ceil(totalItems / limit);
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    filteredResults = filteredResults.slice(startIndex, endIndex);
 
     res.send(`
       <!DOCTYPE html>
@@ -1894,46 +1936,22 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Перегляд результатів</title>
+          <title>Перегляд результатів тестів</title>
           <style>
-            body { font-family: Arial, sans-serif; font-size: 16px; margin: 20px; }
+            body { font-size: 16px; margin: 20px; }
             h1 { font-size: 24px; margin-bottom: 20px; }
-            table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #f2f2f2; cursor: pointer; }
-            th:hover { background-color: #e0e0e0; }
-            tr:nth-child(even) { background-color: #f9f9f9; }
-            tr:hover { background-color: #f1f1f1; }
-            .answers { display: none; white-space: pre-wrap; max-width: 300px; overflow-wrap: break-word; line-height: 1.8; }
-            .pagination { margin: 20px 0; display: flex; justify-content: center; gap: 10px; }
-            .pagination button { padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
-            .pagination button:disabled { background-color: #cccccc; cursor: not-allowed; }
-            .filter-form { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
-            .filter-form input, .filter-form select { padding: 8px; font-size: 14px; }
-            .filter-form button { padding: 8px 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; }
-            .export-btn { padding: 8px 16px; background-color: #17a2b8; color: white; border: none; border-radius: 5px; cursor: pointer; margin-bottom: 20px; }
-            button { transition: background-color 0.3s; }
-            button:hover:not(:disabled) { opacity: 0.9; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+            th { background-color: #f0f0f0; }
+            button { font-size: 16px; padding: 5px 10px; border: none; border-radius: 5px; background-color: #007bff; color: white; cursor: pointer; }
+            button:hover { background-color: #0056b3; }
+            .answers { display: none; margin-top: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+            .back-btn { margin-bottom: 20px; }
           </style>
         </head>
         <body>
           <h1>Перегляд результатів тестів</h1>
-          <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
-          <button class="export-btn" onclick="exportToCSV()">Експортувати в CSV</button>
-          <div class="filter-form">
-            <input type="text" id="userFilter" placeholder="Фільтр за користувачем" value="${userFilter}">
-            <input type="text" id="testFilter" placeholder="Фільтр за тестом" value="${testFilter}">
-            <select id="sortBy">
-              <option value="endTime" ${sortBy === 'endTime' ? 'selected' : ''}>Дата</option>
-              <option value="score" ${sortBy === 'score' ? 'selected' : ''}>Результат</option>
-              <option value="duration" ${sortBy === 'duration' ? 'selected' : ''}>Тривалість</option>
-            </select>
-            <select id="sortOrder">
-              <option value="desc" ${sortOrder === 'desc' ? 'selected' : ''}>Спадання</option>
-              <option value="asc" ${sortOrder === 'asc' ? 'selected' : ''}>Зростання</option>
-            </select>
-            <button onclick="applyFilters()">Фільтрувати</button>
-          </div>
+          <button class="back-btn" onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
           <table>
             <thead>
               <tr>
@@ -1947,7 +1965,7 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
               </tr>
             </thead>
             <tbody>
-              ${filteredResults.map((result, idx) => `
+              ${parsedResults.map((result, idx) => `
                 <tr>
                   <td>${result.user}</td>
                   <td>${testNames[result.testNumber]?.name || 'Невідомий тест'}</td>
@@ -1964,7 +1982,7 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
                     <div id="answers-${idx}" class="answers">
                       ${Object.entries(result.answers).map(([qIdx, answer]) => {
                         const question = questionsByTest[result.testNumber]?.[qIdx];
-                        if (!question) return `<p>Питання ${parseInt(qIdx) + 1}: Відповідь: ${Array.isArray(answer) ? answer.join(', ') : answer} (Питання не знайдено)</p>`;
+                        if (!question) return `<p>Питання ${parseInt(qIdx) + 1}: Відповідь: ${answer} (Питання не знайдено)</p>`;
                         const isCorrect = result.scoresPerQuestion[qIdx] > 0;
                         return `
                           <p>
@@ -1981,56 +1999,10 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
               `).join('')}
             </tbody>
           </table>
-          <div class="pagination">
-            <button onclick="window.location.href='/admin/view-results?page=${page - 1}&limit=${limit}&user=${encodeURIComponent(userFilter)}&test=${encodeURIComponent(testFilter)}&sortBy=${sortBy}&sortOrder=${sortOrder}'" ${page === 1 ? 'disabled' : ''}>Попередня</button>
-            <span>Сторінка ${page} з ${totalPages}</span>
-            <button onclick="window.location.href='/admin/view-results?page=${page + 1}&limit=${limit}&user=${encodeURIComponent(userFilter)}&test=${encodeURIComponent(testFilter)}&sortBy=${sortBy}&sortOrder=${sortOrder}'" ${page === totalPages ? 'disabled' : ''}>Наступна</button>
-          </div>
           <script>
             function toggleAnswers(index) {
               const answersDiv = document.getElementById('answers-' + index);
               answersDiv.style.display = answersDiv.style.display === 'block' ? 'none' : 'block';
-            }
-
-            function applyFilters() {
-              const userFilter = document.getElementById('userFilter').value;
-              const testFilter = document.getElementById('testFilter').value;
-              const sortBy = document.getElementById('sortBy').value;
-              const sortOrder = document.getElementById('sortOrder').value;
-              window.location.href = '/admin/view-results?page=1&limit=${limit}&user=' + encodeURIComponent(userFilter) + '&test=' + encodeURIComponent(testFilter) + '&sortBy=' + sortBy + '&sortOrder=' + sortOrder;
-            }
-
-            function exportToCSV() {
-              const results = ${JSON.stringify(filteredResults)};
-              const questionsByTest = ${JSON.stringify(questionsByTest)};
-              let csvContent = 'Користувач,Тест,Результат,Тривалість,Підозріла активність,Дата,Питання,Текст питання,Відповідь,Правильна відповідь,Оцінка\\n';
-
-              results.forEach(result => {
-                const testName = ${JSON.stringify(testNames)}[result.testNumber]?.name || 'Невідомий тест';
-                Object.entries(result.answers).forEach(([qIdx, answer]) => {
-                  const question = questionsByTest[result.testNumber]?.[qIdx];
-                  const row = [
-                    result.user,
-                    testName,
-                    \`\${result.score} / \${result.totalPoints}\`,
-                    "${formatDuration(result.duration)}",
-                    \`\${Math.round((result.suspiciousBehavior / (result.duration || 1)) * 100)}%\`,
-                    new Date(result.endTime).toLocaleString(),
-                    parseInt(qIdx) + 1,
-                    question ? question.text : 'Питання не знайдено',
-                    Array.isArray(answer) ? answer.join(', ') : answer,
-                    question ? question.correctAnswers.join(', ') : 'Н/Д',
-                    question ? \`\${result.scoresPerQuestion[qIdx]} / \${question.points}\` : 'Н/Д',
-                  ].map(cell => \`"\\\${cell}"\`).join(',');
-                  csvContent += row + '\\n';
-                });
-              });
-
-              const blob = new Blob([csvContent], { type: 'text, charset=utf-8' });
-              const link = document.createElement('a');
-              link.href = URL.createObjectURL(blob);
-              link.download = 'test_results.csv';
-              link.click();
             }
           </script>
         </body>
@@ -2043,10 +2015,31 @@ app.get('/admin/view-results', checkAdmin, async (req, res) => {
   }
 });
 
-// Обработка подозрительного поведения
-app.post('/test/suspicious', checkAuth, async (req, res) => {
+// Logout route
+app.get('/logout', (req, res) => {
   const startTime = Date.now();
-  logger.info('Handling POST /test/suspicious');
+  logger.info('Handling GET /logout');
+
+  try {
+    req.session.destroy((err) => {
+      if (err) {
+        logger.error(`Error destroying session during logout: ${err.message}`, { stack: err.stack });
+        return res.status(500).send('Помилка при виході');
+      }
+      res.clearCookie('savedPassword');
+      logger.info(`User logged out successfully, took ${Date.now() - startTime}ms`);
+      res.redirect('/');
+    });
+  } catch (error) {
+    logger.error(`Error in GET /logout, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+    res.status(500).send('Помилка сервера');
+  }
+});
+
+// Handle suspicious behavior
+app.post('/report-suspicious', checkAuth, async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling POST /report-suspicious');
 
   try {
     const userTest = await getUserTest(req.user);
@@ -2058,50 +2051,24 @@ app.post('/test/suspicious', checkAuth, async (req, res) => {
     userTest.suspiciousBehavior = (userTest.suspiciousBehavior || 0) + 1;
     await setUserTest(req.user, userTest);
 
-    logger.info(`Suspicious behavior recorded for user ${req.user}, took ${Date.now() - startTime}ms`);
+    logger.info(`Suspicious behavior reported for user ${req.user}, took ${Date.now() - startTime}ms`);
     res.json({ success: true });
   } catch (error) {
-    logger.error(`Error in POST /test/suspicious, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+    logger.error(`Error in POST /report-suspicious, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Помилка сервера' });
   }
 });
 
-// Выход из системы
-app.get('/logout', (req, res) => {
-  const startTime = Date.now();
-  logger.info('Handling GET /logout');
-
-  try {
-    res.clearCookie('auth');
-    res.clearCookie('savedPassword');
-    logger.info(`User logged out, took ${Date.now() - startTime}ms`);
-    res.redirect('/');
-  } catch (error) {
-    logger.error(`Error in GET /logout, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
-    res.status(500).send('Помилка сервера');
-  }
-});
-
-// Обработка favicon
-app.get('/favicon.ico', (req, res) => {
-  res.status(204).end();
-});
-
-app.get('/favicon.png', (req, res) => {
-  res.status(204).end();
-});
-
-// Обработка ошибок 404
-app.use((req, res) => {
-  const startTime = Date.now();
-  logger.warn(`404 Not Found: ${req.method} ${req.url}`);
-  res.status(404).send(`
+// Error handling middleware
+app.use((err, req, res, next) => {
+  logger.error(`Unhandled error: ${err.message}`, { stack: err.stack, path: req.path, method: req.method });
+  res.status(500).send(`
     <!DOCTYPE html>
     <html>
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>404 - Сторінка не знайдена</title>
+        <title>Помилка сервера</title>
         <style>
           body { font-size: 16px; margin: 20px; text-align: center; }
           h1 { font-size: 24px; margin-bottom: 20px; }
@@ -2110,53 +2077,37 @@ app.use((req, res) => {
         </style>
       </head>
       <body>
-        <h1>404 - Сторінка не знайдена</h1>
-        <p>Сторінка, яку ви шукаєте, не існує.</p>
+        <h1>Помилка сервера</h1>
+        <p>Виникла помилка на сервері. Спробуйте ще раз пізніше.</p>
         <button onclick="window.location.href='/'">Повернутися на головну</button>
       </body>
     </html>
   `);
-  logger.info(`404 response sent, took ${Date.now() - startTime}ms`);
 });
 
-// Запуск сервера
+// Start the server
 const PORT = process.env.PORT || 3000;
-const startServer = async () => {
+app.listen(PORT, async () => {
+  logger.info(`Server is running on port ${PORT}`);
   try {
     await initializeServer();
-    app.listen(PORT, () => {
-      logger.info(`Server is running on port ${PORT}`);
-    });
   } catch (error) {
-    logger.error('Failed to start server:', { message: error.message, stack: error.stack });
+    logger.error(`Failed to initialize server: ${error.message}`, { stack: error.stack });
     process.exit(1);
   }
+});
+
+// Graceful shutdown
+const shutdown = async () => {
+  logger.info('Received shutdown signal, closing server...');
+  try {
+    await redis.quit();
+    logger.info('Redis connection closed');
+  } catch (error) {
+    logger.error(`Error closing Redis connection: ${error.message}`, { stack: error.stack });
+  }
+  process.exit(0);
 };
 
-startServer();
-
-// Обработка завершения процесса
-process.on('SIGINT', async () => {
-  logger.info('Received SIGINT. Shutting down gracefully...');
-  try {
-    if (redisReady) {
-      await redis.quit();
-      logger.info('Redis connection closed');
-    }
-    logger.info('Server shutdown complete');
-    process.exit(0);
-  } catch (error) {
-    logger.error('Error during shutdown:', { message: error.message, stack: error.stack });
-    process.exit(1);
-  }
-});
-
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', { message: error.message, stack: error.stack });
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', { promise, reason: reason instanceof Error ? reason.message : reason, stack: reason instanceof Error ? reason.stack : undefined });
-  process.exit(1);
-});
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
