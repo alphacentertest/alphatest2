@@ -1,7 +1,4 @@
 {
-  "engines": {
-    "node": "22.x"
-  },
   "builds": [
     {
       "src": "server.js",
