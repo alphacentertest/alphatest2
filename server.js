@@ -245,7 +245,7 @@ const loadTestNames = async () => {
   logger.info('Завантаження назв тестів з локальних файлів');
 
   try {
-    const dataDir = 'C:\\Users\\roman\\Программирование\\test-with-password\\alphatest2\\data';
+    const dataDir = path.join(__dirname, 'data'); // Относительный путь от корня проекта
     const questionFiles = ['questions1.xlsx', 'questions2.xlsx'];
 
     testNames = {};
@@ -300,7 +300,7 @@ const loadUsers = async () => {
       logger.warn('Redis недоступний, пропускаємо перевірку кешу');
     }
 
-    const filePath = 'C:\\Users\\roman\\Программирование\\test-with-password\\alphatest2\\data\\users.xlsx';
+    const filePath = path.join(__dirname, 'data', 'users.xlsx'); // Относительный путь
     if (!fsSync.existsSync(filePath)) {
       logger.warn(`Файл користувачів ${filePath} не знайдено`);
       return [];
@@ -376,7 +376,7 @@ const loadQuestions = async questionsFile => {
       }
     }
 
-    const filePath = `C:\\Users\\roman\\Программирование\\test-with-password\\alphatest2\\data\\${questionsFile}`;
+    const filePath = path.join(__dirname, 'data', questionsFile); // Относительный путь
     if (!fsSync.existsSync(filePath)) {
       logger.warn(`Файл питань ${filePath} не знайдено`);
       return [];
