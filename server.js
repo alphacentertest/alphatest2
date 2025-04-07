@@ -57,11 +57,11 @@ const redis = new Redis(process.env.REDIS_URL, {
     logger.info(`Спроба підключення до Redis, спроба ${times}, затримка ${delay}мс`);
     if (times > 10) {
       logger.warn('Не вдалося підключитися до Redis після 10 спроб. Продовжуємо без Redis.', {
-        redisUrl: process.env.REDIS_URL,
+        redisUrl: process.env.REDIS_URL ? process.env.REDIS_URL.replace(/:[^@]+@/, ':<password>@') : 'Не встановлено',
         status: redis.status,
       });
       redisReady = false;
-      return null;
+      return null; // Припиняємо повторні спроби
     }
     return delay;
   },
@@ -98,7 +98,8 @@ const waitForRedis = () => {
         redisUrl: process.env.REDIS_URL ? process.env.REDIS_URL.replace(/:[^@]+@/, ':<password>@') : 'Не встановлено',
         tlsConfig: redis.options.tls || 'Не встановлено',
       });
-      reject(err);
+      // Не завершаємо ініціалізацію, дозволяємо серверу працювати без Redis
+      resolve();
     });
 
     redis.on('connect', () => {
@@ -160,9 +161,13 @@ const sessionOptions = {
     await waitForRedis();
     app.use(session({
       ...sessionOptions,
-      store: new RedisStore({ client: redis }),
+      store: redisReady ? new RedisStore({ client: redis }) : undefined,
     }));
-    logger.info('Сесії налаштовані з Redis');
+    if (redisReady) {
+      logger.info('Сесії налаштовані з Redis');
+    } else {
+      logger.warn('Redis недоступний, використовуємо пам’ять для зберігання сесій');
+    }
   } catch (error) {
     logger.warn('Redis недоступний, використовуємо пам’ять для зберігання сесій');
     app.use(session(sessionOptions));
@@ -663,15 +668,6 @@ const initializeServer = async () => {
     }
   }
 
-  logger.info('Спроба підключення до Redis...');
-  try {
-    await redis.ping();
-    logger.info('Підключення до Redis успішне');
-  } catch (error) {
-    logger.error('Не вдалося підключитися до Redis:', { message: error.message, stack: error.stack });
-    redisReady = false;
-  }
-
   logger.info('Завантаження назв тестів...');
   try {
     if (redisReady) {
@@ -831,7 +827,6 @@ app.get('/', async (req, res) => {
           <div class="container">
             <h1>Вхід</h1>
             <form action="/login" method="POST">
-              <input type="hidden" name="_csrf" value="${req.csrfToken()}">
               <label>Пароль:</label>
               <div class="password-container">
                 <input type="password" id="password" name="password" value="${savedPassword}" required>
@@ -1651,7 +1646,7 @@ app.get('/admin', checkAdmin, async (req, res) => {
             <button onclick="window.location.href='/admin/edit-tests'">Редагувати тести</button>
             <button onclick="window.location.href='/admin/view-results'">Перегляд результатів тестів</button>
             <button onclick="deleteResults()">Видалити результати тестів</button>
-                        <button onclick="window.location.href='/logout'">Вийти</button>
+            <button onclick="window.location.href='/logout'">Вийти</button>
           </div>
           <h2>Результати тестів</h2>
           <table>

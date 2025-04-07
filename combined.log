@@ -3656,3 +3656,34 @@
 {"level":"warn","message":"Redis reconnecting...","timestamp":"2025-04-06T14:56:21.108Z"}
 {"level":"warn","message":"Retrying Redis connection, attempt 3","timestamp":"2025-04-06T14:56:21.154Z"}
 {"level":"warn","message":"Retrying Redis connection, attempt 4","timestamp":"2025-04-06T14:56:21.784Z"}
+{"level":"info","message":"Сервер запущений на порту 3000","timestamp":"2025-04-07T15:30:37.835Z"}
+{"level":"info","message":"Початок ініціалізації сервера...","timestamp":"2025-04-07T15:30:37.840Z"}
+{"level":"info","message":"Перевірка змінних середовища...","timestamp":"2025-04-07T15:30:37.840Z"}
+{"level":"info","message":"Змінна середовища REDIS_URL присутня: redis:<password>@secure-muskrat-44892.upstash.io:6379","timestamp":"2025-04-07T15:30:37.840Z"}
+{"level":"info","message":"Змінна середовища BLOB_READ_WRITE_TOKEN присутня: значення приховане","timestamp":"2025-04-07T15:30:37.841Z"}
+{"level":"info","message":"Змінна середовища AWS_ACCESS_KEY_ID присутня: значення приховане","timestamp":"2025-04-07T15:30:37.841Z"}
+{"level":"info","message":"Змінна середовища AWS_SECRET_ACCESS_KEY присутня: значення приховане","timestamp":"2025-04-07T15:30:37.841Z"}
+{"level":"info","message":"Змінна середовища AWS_REGION присутня: значення приховане","timestamp":"2025-04-07T15:30:37.841Z"}
+{"level":"info","message":"Змінна середовища S3_BUCKET_NAME присутня: значення приховане","timestamp":"2025-04-07T15:30:37.842Z"}
+{"level":"info","message":"Змінна середовища ADMIN_PASSWORD_HASH присутня: значення приховане","timestamp":"2025-04-07T15:30:37.842Z"}
+{"level":"info","message":"Змінна середовища SESSION_SECRET присутня: значення приховане","timestamp":"2025-04-07T15:30:37.842Z"}
+{"level":"info","message":"Спроба підключення до Redis...","timestamp":"2025-04-07T15:30:37.842Z"}
+{"level":"info","message":"Redis успішно підключений","timestamp":"2025-04-07T15:30:37.953Z"}
+{"level":"info","message":"Redis готовий приймати команди","timestamp":"2025-04-07T15:30:38.022Z"}
+{"level":"info","message":"Сесії налаштовані з Redis","timestamp":"2025-04-07T15:30:38.023Z"}
+{"level":"info","message":"Підключення до Redis успішне","timestamp":"2025-04-07T15:30:38.069Z"}
+{"level":"info","message":"Завантаження назв тестів...","timestamp":"2025-04-07T15:30:38.070Z"}
+{"level":"info","message":"Завантаження назв тестів динамічно","timestamp":"2025-04-07T15:30:38.118Z"}
+{"level":"info","message":"Спроба отримати список файлів з Vercel Blob Storage","timestamp":"2025-04-07T15:30:38.118Z"}
+{"level":"info","message":"Успішно отримано 3 файлів з Vercel Blob Storage","timestamp":"2025-04-07T15:30:38.651Z"}
+{"level":"info","message":"Назви тестів збережено в Redis","timestamp":"2025-04-07T15:30:38.700Z"}
+{"level":"info","message":"Завантажено 2 тестів динамічно, тривалість 582мс","timestamp":"2025-04-07T15:30:38.700Z"}
+{"level":"info","message":"Завантаження користувачів...","timestamp":"2025-04-07T15:30:38.700Z"}
+{"level":"info","message":"Спроба завантаження користувачів з Vercel Blob Storage...","timestamp":"2025-04-07T15:30:38.701Z"}
+{"level":"info","message":"Спроба отримати список файлів з Vercel Blob Storage","timestamp":"2025-04-07T15:30:38.749Z"}
+{"level":"info","message":"Успішно отримано 3 файлів з Vercel Blob Storage","timestamp":"2025-04-07T15:30:38.933Z"}
+{"level":"warn","message":"Файл користувачів не знайдено у Vercel Blob Storage","timestamp":"2025-04-07T15:30:38.934Z"}
+{"level":"warn","message":"Не знайдено жодного користувача. Перевірте наявність файлу users.xlsx у Vercel Blob Storage.","timestamp":"2025-04-07T15:30:38.934Z"}
+{"level":"info","message":"Ініціалізація паролів...","timestamp":"2025-04-07T15:30:38.934Z"}
+{"level":"info","message":"Ініціалізовано паролі для 1 користувачів","timestamp":"2025-04-07T15:30:38.935Z"}
+{"level":"info","message":"Ініціалізація сервера завершена","timestamp":"2025-04-07T15:30:38.935Z"}
