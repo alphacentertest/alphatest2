@@ -17,7 +17,7 @@ export async function extractImagePatches(
   const imgCtx = getContext2dOrThrow(img);
 
   const bitmaps = await Promise.all(
-    boxes.map(async (box) => {
+    boxes.map(async box => {
       // TODO: correct padding
       const { y, ey, x, ex } = box.padAtBorders(img.height, img.width);
 
@@ -33,7 +33,7 @@ export async function extractImagePatches(
 
   const imagePatchesDatas: number[][] = [];
 
-  bitmaps.forEach((bmp) => {
+  bitmaps.forEach(bmp => {
     const patch = createCanvas({ width, height });
     const patchCtx = getContext2dOrThrow(patch);
     patchCtx.drawImage(bmp, 0, 0, width, height);
@@ -49,7 +49,7 @@ export async function extractImagePatches(
     imagePatchesDatas.push(currData);
   });
 
-  return imagePatchesDatas.map((data) => {
+  return imagePatchesDatas.map(data => {
     const t = tf.tidy(() => {
       const imagePatchTensor = tf
         .transpose(tf.tensor4d(data, [1, width, height, 3]), [0, 2, 1, 3])

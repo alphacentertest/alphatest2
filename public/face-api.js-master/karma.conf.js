@@ -7,7 +7,7 @@ const dataFiles = [
   'weights/**/*',
   'weights_uncompressed/**/*',
   'weights_unused/**/*',
-].map((pattern) => ({
+].map(pattern => ({
   pattern,
   watched: false,
   included: false,
@@ -26,8 +26,8 @@ let exclude = (
       ]
     : []
 )
-  .filter((ex) => ex !== process.env.UUT)
-  .map((ex) => `test/tests/${ex}/*.ts`);
+  .filter(ex => ex !== process.env.UUT)
+  .map(ex => `test/tests/${ex}/*.ts`);
 
 // exclude nodejs tests
 exclude = exclude.concat(['**/*.node.test.ts']);

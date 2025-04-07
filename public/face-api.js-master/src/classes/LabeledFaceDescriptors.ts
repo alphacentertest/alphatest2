@@ -11,7 +11,7 @@ export class LabeledFaceDescriptors {
 
     if (
       !Array.isArray(descriptors) ||
-      descriptors.some((desc) => !(desc instanceof Float32Array))
+      descriptors.some(desc => !(desc instanceof Float32Array))
     ) {
       throw new Error(
         'LabeledFaceDescriptors - constructor expected descriptors to be an array of Float32Array'
@@ -32,7 +32,7 @@ export class LabeledFaceDescriptors {
   public toJSON(): any {
     return {
       label: this.label,
-      descriptors: this.descriptors.map((d) => Array.from(d)),
+      descriptors: this.descriptors.map(d => Array.from(d)),
     };
   }
 

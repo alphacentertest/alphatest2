@@ -87,15 +87,15 @@ export class SsdMobilenetv1 extends NeuralNetwork<NetParams> {
     const padY = inputSize / reshapedDims.height;
 
     const boxesData = boxes.arraySync();
-    const results = indices.map((idx) => {
+    const results = indices.map(idx => {
       const [top, bottom] = [
         Math.max(0, boxesData[idx][0]),
         Math.min(1.0, boxesData[idx][2]),
-      ].map((val) => val * padY);
+      ].map(val => val * padY);
       const [left, right] = [
         Math.max(0, boxesData[idx][1]),
         Math.min(1.0, boxesData[idx][3]),
-      ].map((val) => val * padX);
+      ].map(val => val * padX);
       return new FaceDetection(
         scoresData[idx],
         new Rect(left, top, right - left, bottom - top),

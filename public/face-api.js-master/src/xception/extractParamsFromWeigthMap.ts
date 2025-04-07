@@ -88,7 +88,7 @@ export function extractParamsFromWeigthMap(
   };
 
   const middle_flow = {};
-  range(numMainBlocks, 0, 1).forEach((idx) => {
+  range(numMainBlocks, 0, 1).forEach(idx => {
     middle_flow[`main_block_${idx}`] = extractMainBlockParams(
       `middle_flow/main_block_${idx}`
     );

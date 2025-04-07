@@ -62,7 +62,7 @@ describe('NetInput', () => {
         new NetInput(tensors);
       });
 
-      tensors.forEach((t) => t.dispose());
+      tensors.forEach(t => t.dispose());
     });
 
     describe('toBatchTensor', () => {

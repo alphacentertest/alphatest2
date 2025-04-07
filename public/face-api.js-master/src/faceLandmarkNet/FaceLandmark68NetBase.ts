@@ -117,7 +117,7 @@ export abstract class FaceLandmark68NetBase<
       })
     );
 
-    landmarkTensors.forEach((t) => t.dispose());
+    landmarkTensors.forEach(t => t.dispose());
 
     return netInput.isBatchInput ? landmarksForBatch : landmarksForBatch[0];
   }

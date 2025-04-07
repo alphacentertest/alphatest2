@@ -105,7 +105,7 @@ export function drawFaceLandmarks(
   const faceLandmarksArray = Array.isArray(faceLandmarks)
     ? faceLandmarks
     : [faceLandmarks];
-  faceLandmarksArray.forEach((f) => {
+  faceLandmarksArray.forEach(f => {
     const landmarks =
       f instanceof FaceLandmarks
         ? f

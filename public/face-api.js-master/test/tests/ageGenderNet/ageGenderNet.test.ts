@@ -66,7 +66,7 @@ describeWithBackend('ageGenderNet', () => {
       });
 
       it('computes age and gender for batch of tf.Tensor3D', async () => {
-        const inputs = [imgElAngry, imgElSurprised].map((el) =>
+        const inputs = [imgElAngry, imgElSurprised].map(el =>
           tf.browser.fromPixels(createCanvasFromMedia(el))
         );
 
@@ -140,7 +140,7 @@ describeWithBackend('ageGenderNet', () => {
         });
 
         it('multiple tf.Tensor3Ds', async () => {
-          const tensors = [imgElAngry, imgElAngry, imgElAngry].map((el) =>
+          const tensors = [imgElAngry, imgElAngry, imgElAngry].map(el =>
             tf.browser.fromPixels(createCanvasFromMedia(el))
           );
 
@@ -152,7 +152,7 @@ describeWithBackend('ageGenderNet', () => {
             gender.dispose();
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
 
         it('single batch size 1 tf.Tensor4Ds', async () => {
@@ -174,7 +174,7 @@ describeWithBackend('ageGenderNet', () => {
         });
 
         it('multiple batch size 1 tf.Tensor4Ds', async () => {
-          const tensors = [imgElAngry, imgElAngry, imgElAngry].map((el) =>
+          const tensors = [imgElAngry, imgElAngry, imgElAngry].map(el =>
             tf.tidy(() =>
               tf.browser.fromPixels(createCanvasFromMedia(el)).expandDims()
             )
@@ -188,7 +188,7 @@ describeWithBackend('ageGenderNet', () => {
             gender.dispose();
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
       });
 
@@ -222,7 +222,7 @@ describeWithBackend('ageGenderNet', () => {
         });
 
         it('multiple tf.Tensor3Ds', async () => {
-          const tensors = [imgElAngry, imgElAngry, imgElAngry].map((el) =>
+          const tensors = [imgElAngry, imgElAngry, imgElAngry].map(el =>
             tf.browser.fromPixels(createCanvasFromMedia(el))
           );
 
@@ -230,7 +230,7 @@ describeWithBackend('ageGenderNet', () => {
             await ageGenderNet.predictAgeAndGender(tensors);
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
 
         it('single batch size 1 tf.Tensor4Ds', async () => {
@@ -248,7 +248,7 @@ describeWithBackend('ageGenderNet', () => {
         });
 
         it('multiple batch size 1 tf.Tensor4Ds', async () => {
-          const tensors = [imgElAngry, imgElAngry, imgElAngry].map((el) =>
+          const tensors = [imgElAngry, imgElAngry, imgElAngry].map(el =>
             tf.tidy(() =>
               tf.browser.fromPixels(createCanvasFromMedia(el)).expandDims()
             )
@@ -258,7 +258,7 @@ describeWithBackend('ageGenderNet', () => {
             await ageGenderNet.predictAgeAndGender(tensors);
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
       });
     }

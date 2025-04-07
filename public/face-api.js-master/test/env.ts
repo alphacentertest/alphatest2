@@ -9,7 +9,7 @@ if (
   typeof window !== 'undefined' &&
   window['__karma__'] &&
   (window['__karma__'].config.jasmine.args as string[]).some(
-    (arg) => arg === 'backend_cpu'
+    arg => arg === 'backend_cpu'
   )
 ) {
   tf.setBackend('cpu');

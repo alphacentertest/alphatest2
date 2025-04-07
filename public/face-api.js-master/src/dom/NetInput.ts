@@ -140,7 +140,7 @@ export class NetInput {
     this._inputSize = inputSize;
 
     return tf.tidy(() => {
-      const inputTensors = range(this.batchSize, 0, 1).map((batchIdx) => {
+      const inputTensors = range(this.batchSize, 0, 1).map(batchIdx => {
         const input = this.getInput(batchIdx);
 
         if (input instanceof tf.Tensor) {
@@ -174,7 +174,7 @@ export class NetInput {
       });
 
       const batchTensor = tf
-        .stack(inputTensors.map((t) => t.toFloat()))
+        .stack(inputTensors.map(t => t.toFloat()))
         .as4D(this.batchSize, inputSize, inputSize, 3);
 
       return batchTensor;

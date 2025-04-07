@@ -39,7 +39,7 @@ export class DetectAllFacesTask extends DetectFacesTaskBase<FaceDetection[]> {
 
     if (options instanceof MtcnnOptions) {
       return (await nets.mtcnn.forward(input, options)).map(
-        (result) => result.detection
+        result => result.detection
       );
     }
 
@@ -64,10 +64,10 @@ export class DetectAllFacesTask extends DetectFacesTaskBase<FaceDetection[]> {
   }
 
   private runAndExtendWithFaceDetections(): Promise<WithFaceDetection<{}>[]> {
-    return new Promise<WithFaceDetection<{}>[]>(async (res) => {
+    return new Promise<WithFaceDetection<{}>[]>(async res => {
       const detections = await this.run();
       return res(
-        detections.map((detection) => extendWithFaceDetection({}, detection))
+        detections.map(detection => extendWithFaceDetection({}, detection))
       );
     });
   }
@@ -104,7 +104,7 @@ export class DetectSingleFaceTask extends DetectFacesTaskBase<
       this.options
     );
     let faceDetectionWithHighestScore = faceDetections[0];
-    faceDetections.forEach((faceDetection) => {
+    faceDetections.forEach(faceDetection => {
       if (faceDetection.score > faceDetectionWithHighestScore.score) {
         faceDetectionWithHighestScore = faceDetection;
       }
@@ -113,7 +113,7 @@ export class DetectSingleFaceTask extends DetectFacesTaskBase<
   }
 
   private runAndExtendWithFaceDetection(): Promise<WithFaceDetection<{}>> {
-    return new Promise<WithFaceDetection<{}>>(async (res) => {
+    return new Promise<WithFaceDetection<{}>>(async res => {
       const detection = await this.run();
       return res(
         detection ? extendWithFaceDetection<{}>({}, detection) : undefined

@@ -30,7 +30,7 @@ export class FaceLandmarks implements IFaceLandmarks {
     const { width, height } = imgDims;
     this._imgDims = new Dimensions(width, height);
     this._shift = shift;
-    this._positions = relativeFaceLandmarkPositions.map((pt) =>
+    this._positions = relativeFaceLandmarkPositions.map(pt =>
       pt.mul(new Point(width, height)).add(shift)
     );
   }
@@ -48,7 +48,7 @@ export class FaceLandmarks implements IFaceLandmarks {
     return this._positions;
   }
   public get relativePositions(): Point[] {
-    return this._positions.map((pt) =>
+    return this._positions.map(pt =>
       pt.sub(this._shift).div(new Point(this.imageWidth, this.imageHeight))
     );
   }

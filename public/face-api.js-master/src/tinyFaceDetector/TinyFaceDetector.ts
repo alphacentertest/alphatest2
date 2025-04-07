@@ -33,7 +33,7 @@ export class TinyFaceDetector extends TinyYolov2Base {
   ): Promise<FaceDetection[]> {
     const objectDetections = await this.detect(input, forwardParams);
     return objectDetections.map(
-      (det) =>
+      det =>
         new FaceDetection(det.score, det.relativeBox, {
           width: det.imageWidth,
           height: det.imageHeight,

@@ -42,7 +42,7 @@ export function padToSquare(
       imgTensor,
       paddingTensorAppend,
     ]
-      .filter((t) => !!t)
+      .filter(t => !!t)
       .map((t: tf.Tensor) => t.toFloat()) as tf.Tensor4D[];
     return tf.concat(tensorsToStack, paddingAxis);
   });

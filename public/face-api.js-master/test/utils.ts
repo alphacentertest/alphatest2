@@ -77,25 +77,25 @@ export function sortByDistanceToOrigin<T>(
 }
 
 export function sortBoxes(boxes: IRect[]) {
-  return sortByDistanceToOrigin(boxes, (rect) => rect);
+  return sortByDistanceToOrigin(boxes, rect => rect);
 }
 
 export function sortFaceDetections(boxes: FaceDetection[]) {
-  return sortByDistanceToOrigin(boxes, (det) => det.box);
+  return sortByDistanceToOrigin(boxes, det => det.box);
 }
 
 export function sortLandmarks(landmarks: FaceLandmarks[]) {
-  return sortByDistanceToOrigin(landmarks, (l) => l.positions[0]);
+  return sortByDistanceToOrigin(landmarks, l => l.positions[0]);
 }
 
 export function sortByFaceBox<T extends { box: IRect }>(objs: T[]) {
-  return sortByDistanceToOrigin(objs, (o) => o.box);
+  return sortByDistanceToOrigin(objs, o => o.box);
 }
 
 export function sortByFaceDetection<T extends { detection: FaceDetection }>(
   objs: T[]
 ) {
-  return sortByDistanceToOrigin(objs, (d) => d.detection.box);
+  return sortByDistanceToOrigin(objs, d => d.detection.box);
 }
 
 export function fakeTensor3d(dtype: tf.DataType = 'int32') {

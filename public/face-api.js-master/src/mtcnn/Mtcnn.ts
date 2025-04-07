@@ -85,14 +85,14 @@ export class Mtcnn extends NeuralNetwork<NetParams> {
     const scales = (
       scaleSteps || pyramidDown(minFaceSize, scaleFactor, [height, width])
     )
-      .filter((scale) => {
+      .filter(scale => {
         const sizes = getSizesForScale(scale, [height, width]);
         return Math.min(sizes.width, sizes.height) > CELL_SIZE;
       })
       .slice(0, maxNumScales);
 
     stats.scales = scales;
-    stats.pyramid = scales.map((scale) =>
+    stats.pyramid = scales.map(scale =>
       getSizesForScale(scale, [height, width])
     );
 
@@ -158,7 +158,7 @@ export class Mtcnn extends NeuralNetwork<NetParams> {
           )
         ),
         new FaceLandmarks5(
-          out3.points[idx].map((pt) =>
+          out3.points[idx].map(pt =>
             pt
               .sub(new Point(box.left, box.top))
               .div(new Point(box.width, box.height))

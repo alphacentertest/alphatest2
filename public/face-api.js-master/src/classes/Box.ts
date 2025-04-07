@@ -109,14 +109,14 @@ export class Box<BoxType = any> implements IBoundingBox, IRect {
 
   public round(): Box<BoxType> {
     const [x, y, width, height] = [this.x, this.y, this.width, this.height].map(
-      (val) => Math.round(val)
+      val => Math.round(val)
     );
     return new Box({ x, y, width, height });
   }
 
   public floor(): Box<BoxType> {
     const [x, y, width, height] = [this.x, this.y, this.width, this.height].map(
-      (val) => Math.floor(val)
+      val => Math.floor(val)
     );
     return new Box({ x, y, width, height });
   }

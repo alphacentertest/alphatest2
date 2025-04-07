@@ -19,7 +19,7 @@ export function drawDetections(
 ) {
   const detectionsArray = Array.isArray(detections) ? detections : [detections];
 
-  detectionsArray.forEach((det) => {
+  detectionsArray.forEach(det => {
     const score =
       det instanceof FaceDetection
         ? det.score

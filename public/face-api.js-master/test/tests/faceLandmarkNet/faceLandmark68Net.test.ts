@@ -122,7 +122,7 @@ describeWithBackend('faceLandmark68Net', () => {
       });
 
       it('computes face landmarks for batch of tf.Tensor3D', async () => {
-        const inputs = [imgEl1, imgEl2, imgElRect].map((el) =>
+        const inputs = [imgEl1, imgEl2, imgElRect].map(el =>
           tf.browser.fromPixels(createCanvasFromMedia(el))
         );
 
@@ -217,7 +217,7 @@ describeWithBackend('faceLandmark68Net', () => {
         });
 
         it('multiple tf.Tensor3Ds', async () => {
-          const tensors = [imgEl1, imgEl1, imgEl1].map((el) =>
+          const tensors = [imgEl1, imgEl1, imgEl1].map(el =>
             tf.browser.fromPixels(createCanvasFromMedia(el))
           );
 
@@ -227,7 +227,7 @@ describeWithBackend('faceLandmark68Net', () => {
             outTensor.dispose();
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
 
         it('single batch size 1 tf.Tensor4Ds', async () => {
@@ -246,7 +246,7 @@ describeWithBackend('faceLandmark68Net', () => {
         });
 
         it('multiple batch size 1 tf.Tensor4Ds', async () => {
-          const tensors = [imgEl1, imgEl1, imgEl1].map((el) =>
+          const tensors = [imgEl1, imgEl1, imgEl1].map(el =>
             tf.tidy(() =>
               tf.browser.fromPixels(createCanvasFromMedia(el)).expandDims()
             )
@@ -259,7 +259,7 @@ describeWithBackend('faceLandmark68Net', () => {
             outTensor.dispose();
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
       });
 
@@ -287,7 +287,7 @@ describeWithBackend('faceLandmark68Net', () => {
         });
 
         it('multiple tf.Tensor3Ds', async () => {
-          const tensors = [imgEl1, imgEl1, imgEl1].map((el) =>
+          const tensors = [imgEl1, imgEl1, imgEl1].map(el =>
             tf.browser.fromPixels(createCanvasFromMedia(el))
           );
 
@@ -295,7 +295,7 @@ describeWithBackend('faceLandmark68Net', () => {
             await faceLandmark68Net.detectLandmarks(tensors);
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
 
         it('single batch size 1 tf.Tensor4Ds', async () => {
@@ -311,7 +311,7 @@ describeWithBackend('faceLandmark68Net', () => {
         });
 
         it('multiple batch size 1 tf.Tensor4Ds', async () => {
-          const tensors = [imgEl1, imgEl1, imgEl1].map((el) =>
+          const tensors = [imgEl1, imgEl1, imgEl1].map(el =>
             tf.tidy(() =>
               tf.browser.fromPixels(createCanvasFromMedia(el)).expandDims()
             )
@@ -321,7 +321,7 @@ describeWithBackend('faceLandmark68Net', () => {
             await faceLandmark68Net.detectLandmarks(tensors);
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
       });
     }

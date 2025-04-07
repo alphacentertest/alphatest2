@@ -22,7 +22,7 @@ export async function stage2(
   stats.stage2_extractImagePatches = Date.now() - ts;
 
   ts = Date.now();
-  const rnetOuts = rnetInputs.map((rnetInput) => {
+  const rnetOuts = rnetInputs.map(rnetInput => {
     const out = RNet(rnetInput, params);
     rnetInput.dispose();
     return out;
@@ -31,18 +31,18 @@ export async function stage2(
 
   const scoresTensor =
     rnetOuts.length > 1
-      ? tf.concat(rnetOuts.map((out) => out.scores))
+      ? tf.concat(rnetOuts.map(out => out.scores))
       : rnetOuts[0].scores;
   const scores = Array.from(await scoresTensor.data());
   scoresTensor.dispose();
 
   const indices = scores
     .map((score, idx) => ({ score, idx }))
-    .filter((c) => c.score > scoreThreshold)
+    .filter(c => c.score > scoreThreshold)
     .map(({ idx }) => idx);
 
-  const filteredBoxes = indices.map((idx) => inputBoxes[idx]);
-  const filteredScores = indices.map((idx) => scores[idx]);
+  const filteredBoxes = indices.map(idx => inputBoxes[idx]);
+  const filteredScores = indices.map(idx => scores[idx]);
 
   let finalBoxes: Box[] = [];
   let finalScores: number[] = [];
@@ -52,7 +52,7 @@ export async function stage2(
     const indicesNms = nonMaxSuppression(filteredBoxes, filteredScores, 0.7);
     stats.stage2_nms = Date.now() - ts;
 
-    const regions = indicesNms.map((idx) => {
+    const regions = indicesNms.map(idx => {
       const regionsData = rnetOuts[indices[idx]].regions.arraySync();
       return new MtcnnBox(
         regionsData[0][0],
@@ -62,13 +62,13 @@ export async function stage2(
       );
     });
 
-    finalScores = indicesNms.map((idx) => filteredScores[idx]);
+    finalScores = indicesNms.map(idx => filteredScores[idx]);
     finalBoxes = indicesNms.map((idx, i) =>
       filteredBoxes[idx].calibrate(regions[i])
     );
   }
 
-  rnetOuts.forEach((t) => {
+  rnetOuts.forEach(t => {
     t.regions.dispose();
     t.scores.dispose();
   });

@@ -19,7 +19,9 @@ if (!REDIS_URL) {
 }
 
 if (!BLOB_READ_WRITE_TOKEN) {
-  console.error('BLOB_READ_WRITE_TOKEN is not defined in environment variables');
+  console.error(
+    'BLOB_READ_WRITE_TOKEN is not defined in environment variables'
+  );
   process.exit(1);
 }
 
@@ -28,7 +30,7 @@ const redisClient = createClient({
   url: REDIS_URL,
 });
 
-redisClient.on('error', (err) => {
+redisClient.on('error', err => {
   console.error('Redis Client Error:', err);
 });
 
@@ -50,7 +52,10 @@ async function checkBlobStorage() {
     console.log('Checking Vercel Blob Storage...');
     // Простой запрос к Blob Storage для проверки токена
     const { blobs } = await list({ token: BLOB_READ_WRITE_TOKEN });
-    console.log('Vercel Blob Storage is accessible. Found blobs:', blobs.length);
+    console.log(
+      'Vercel Blob Storage is accessible. Found blobs:',
+      blobs.length
+    );
   } catch (err) {
     console.error('Failed to access Vercel Blob Storage:', err.message);
     process.exit(1);

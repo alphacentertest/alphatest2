@@ -77,7 +77,7 @@
         const questionText = q.question.richText
           ? q.question.richText
               .map(
-                (rt) =>
+                rt =>
                   `<span style="font-weight: ${rt.font.bold ? 'bold' : 'normal'}; font-style: ${rt.font.italic ? 'italic' : 'normal'}">${rt.text}</span>`
               )
               .join('')
@@ -118,7 +118,7 @@
             document.querySelectorAll(
               `input[name="answer${currentIndex}"]:checked`
             )
-          ).map((input) => input.value);
+          ).map(input => input.value);
           q.userAnswer = selected.length > 0 ? selected : null;
           console.log(`Question ${currentIndex} saved answer:`, q.userAnswer);
         } else if (q.type === 'input') {

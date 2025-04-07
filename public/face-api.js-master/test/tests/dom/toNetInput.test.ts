@@ -82,10 +82,10 @@ describe('toNetInput', () => {
 
   describe('no memory leaks', () => {
     it('constructor', async () => {
-      const tensors = [imgEl, imgEl, imgEl].map((el) =>
+      const tensors = [imgEl, imgEl, imgEl].map(el =>
         tf.browser.fromPixels(createCanvasFromMedia(el))
       );
-      const tensor4ds = tensors.map((t) => t.expandDims<tf.Rank.R4>());
+      const tensor4ds = tensors.map(t => t.expandDims<tf.Rank.R4>());
 
       await expectAllTensorsReleased(async () => {
         await toNetInput(imgEl);
@@ -96,8 +96,8 @@ describe('toNetInput', () => {
         await toNetInput(tensor4ds);
       });
 
-      tensors.forEach((t) => t.dispose());
-      tensor4ds.forEach((t) => t.dispose());
+      tensors.forEach(t => t.dispose());
+      tensor4ds.forEach(t => t.dispose());
     });
   });
 });

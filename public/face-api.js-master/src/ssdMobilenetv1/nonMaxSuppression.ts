@@ -12,14 +12,14 @@ export function nonMaxSuppression(
 
   const candidates = scores
     .map((score, boxIndex) => ({ score, boxIndex }))
-    .filter((c) => c.score > scoreThreshold)
+    .filter(c => c.score > scoreThreshold)
     .sort((c1, c2) => c2.score - c1.score);
 
   const suppressFunc = (x: number) => (x <= iouThreshold ? 1 : 0);
 
   const selected: number[] = [];
 
-  candidates.forEach((c) => {
+  candidates.forEach(c => {
     if (selected.length >= outputSize) {
       return;
     }

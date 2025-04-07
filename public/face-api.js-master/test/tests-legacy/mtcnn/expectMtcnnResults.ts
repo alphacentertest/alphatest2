@@ -25,7 +25,7 @@ export function expectMtcnnResults(
 ) {
   const expectedMtcnnFaceLandmarksSorted = sortByDistanceToOrigin(
     expectedMtcnnFaceLandmarks,
-    (obj) => obj[0]
+    obj => obj[0]
   );
   const expectedResults = expectedMtcnnBoxes.map((detection, i) => ({
     detection,

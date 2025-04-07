@@ -115,7 +115,7 @@ export function extractParams(
   };
 
   const middle_flow = {};
-  range(numMainBlocks, 0, 1).forEach((idx) => {
+  range(numMainBlocks, 0, 1).forEach(idx => {
     middle_flow[`main_block_${idx}`] = extractMainBlockParams(
       128,
       `middle_flow/main_block_${idx}`

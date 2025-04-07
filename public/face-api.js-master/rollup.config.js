@@ -33,13 +33,13 @@ export default {
     sourcemap: minify ? false : true,
   },
   external: ['crypto'],
-  onwarn: (warning) => {
+  onwarn: warning => {
     const ignoreWarnings = [
       'CIRCULAR_DEPENDENCY',
       'CIRCULAR',
       'THIS_IS_UNDEFINED',
     ];
-    if (ignoreWarnings.some((w) => w === warning.code)) return;
+    if (ignoreWarnings.some(w => w === warning.code)) return;
 
     if (warning.missing === 'alea') return;
 

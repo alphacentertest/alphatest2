@@ -25,7 +25,7 @@ function depthwiseConvLayer(
 }
 
 function getStridesForLayerIdx(layerIdx: number): [number, number] {
-  return [2, 4, 6, 12].some((idx) => idx === layerIdx) ? [2, 2] : [1, 1];
+  return [2, 4, 6, 12].some(idx => idx === layerIdx) ? [2, 2] : [1, 1];
 }
 
 export function mobileNetV1(x: tf.Tensor4D, params: MobileNetV1.Params) {

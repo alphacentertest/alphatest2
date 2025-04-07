@@ -55,7 +55,7 @@ describeWithBackend('faceExpressionNet', () => {
       });
 
       it('computes face expressions for batch of tf.Tensor3D', async () => {
-        const inputs = [imgElAngry, imgElSurprised].map((el) =>
+        const inputs = [imgElAngry, imgElSurprised].map(el =>
           tf.browser.fromPixels(createCanvasFromMedia(el))
         );
 
@@ -130,7 +130,7 @@ describeWithBackend('faceExpressionNet', () => {
         });
 
         it('multiple tf.Tensor3Ds', async () => {
-          const tensors = [imgElAngry, imgElAngry, imgElAngry].map((el) =>
+          const tensors = [imgElAngry, imgElAngry, imgElAngry].map(el =>
             tf.browser.fromPixels(createCanvasFromMedia(el))
           );
 
@@ -141,7 +141,7 @@ describeWithBackend('faceExpressionNet', () => {
             outTensor.dispose();
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
 
         it('single batch size 1 tf.Tensor4Ds', async () => {
@@ -162,7 +162,7 @@ describeWithBackend('faceExpressionNet', () => {
         });
 
         it('multiple batch size 1 tf.Tensor4Ds', async () => {
-          const tensors = [imgElAngry, imgElAngry, imgElAngry].map((el) =>
+          const tensors = [imgElAngry, imgElAngry, imgElAngry].map(el =>
             tf.tidy(() =>
               tf.browser.fromPixels(createCanvasFromMedia(el)).expandDims()
             )
@@ -175,7 +175,7 @@ describeWithBackend('faceExpressionNet', () => {
             outTensor.dispose();
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
       });
 
@@ -209,7 +209,7 @@ describeWithBackend('faceExpressionNet', () => {
         });
 
         it('multiple tf.Tensor3Ds', async () => {
-          const tensors = [imgElAngry, imgElAngry, imgElAngry].map((el) =>
+          const tensors = [imgElAngry, imgElAngry, imgElAngry].map(el =>
             tf.browser.fromPixels(createCanvasFromMedia(el))
           );
 
@@ -217,7 +217,7 @@ describeWithBackend('faceExpressionNet', () => {
             await faceExpressionNet.predictExpressions(tensors);
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
 
         it('single batch size 1 tf.Tensor4Ds', async () => {
@@ -235,7 +235,7 @@ describeWithBackend('faceExpressionNet', () => {
         });
 
         it('multiple batch size 1 tf.Tensor4Ds', async () => {
-          const tensors = [imgElAngry, imgElAngry, imgElAngry].map((el) =>
+          const tensors = [imgElAngry, imgElAngry, imgElAngry].map(el =>
             tf.tidy(() =>
               tf.browser.fromPixels(createCanvasFromMedia(el)).expandDims()
             )
@@ -245,7 +245,7 @@ describeWithBackend('faceExpressionNet', () => {
             await faceExpressionNet.predictExpressions(tensors);
           });
 
-          tensors.forEach((t) => t.dispose());
+          tensors.forEach(t => t.dispose());
         });
       });
     }

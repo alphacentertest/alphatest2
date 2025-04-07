@@ -41,13 +41,13 @@ export abstract class NeuralNetwork<TNetParams> {
 
   public getTrainableParams() {
     return this.getParamList().filter(
-      (param) => param.tensor instanceof tf.Variable
+      param => param.tensor instanceof tf.Variable
     );
   }
 
   public getFrozenParams() {
     return this.getParamList().filter(
-      (param) => !(param.tensor instanceof tf.Variable)
+      param => !(param.tensor instanceof tf.Variable)
     );
   }
 
@@ -66,7 +66,7 @@ export abstract class NeuralNetwork<TNetParams> {
   }
 
   public dispose(throwOnRedispose: boolean = true) {
-    this.getParamList().forEach((param) => {
+    this.getParamList().forEach(param => {
       if (throwOnRedispose && param.tensor.isDisposed) {
         throw new Error(
           `param tensor has already been disposed for path ${param.path}`
@@ -119,9 +119,7 @@ export abstract class NeuralNetwork<TNetParams> {
 
     const fetchWeightsFromDisk = (filePaths: string[]) =>
       Promise.all(
-        filePaths.map((filePath) =>
-          readFile(filePath).then((buf) => buf.buffer)
-        )
+        filePaths.map(filePath => readFile(filePath).then(buf => buf.buffer))
       );
     const loadWeights = tf.io.weightsLoaderFactory(fetchWeightsFromDisk);
 

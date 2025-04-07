@@ -38,12 +38,12 @@ export async function extractFaces(
 
   const ctx = getContext2dOrThrow(canvas);
   const boxes = detections
-    .map((det) =>
+    .map(det =>
       det instanceof FaceDetection
         ? det.forSize(canvas.width, canvas.height).box.floor()
         : det
     )
-    .map((box) => box.clipAtImageBorders(canvas.width, canvas.height));
+    .map(box => box.clipAtImageBorders(canvas.width, canvas.height));
 
   return boxes.map(({ x, y, width, height }) => {
     const faceImg = createCanvas({ width, height });

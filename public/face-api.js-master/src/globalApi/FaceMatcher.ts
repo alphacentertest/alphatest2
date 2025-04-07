@@ -28,7 +28,7 @@ export class FaceMatcher {
     let count = 1;
     const createUniqueLabel = () => `person ${count++}`;
 
-    this._labeledDescriptors = inputArray.map((desc) => {
+    this._labeledDescriptors = inputArray.map(desc => {
       if (desc instanceof LabeledFaceDescriptors) {
         return desc;
       }
@@ -62,7 +62,7 @@ export class FaceMatcher {
   ): number {
     return (
       descriptors
-        .map((d) => euclideanDistance(d, queryDescriptor))
+        .map(d => euclideanDistance(d, queryDescriptor))
         .reduce((d1, d2) => d1 + d2, 0) / (descriptors.length || 1)
     );
   }
@@ -89,7 +89,7 @@ export class FaceMatcher {
   public toJSON(): any {
     return {
       distanceThreshold: this.distanceThreshold,
-      labeledDescriptors: this.labeledDescriptors.map((ld) => ld.toJSON()),
+      labeledDescriptors: this.labeledDescriptors.map(ld => ld.toJSON()),
     };
   }
 

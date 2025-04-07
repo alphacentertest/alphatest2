@@ -55,10 +55,10 @@ export class PredictAllFaceExpressionsTask<
     >(
       parentResults,
       this.input,
-      async (faces) =>
+      async faces =>
         await Promise.all(
           faces.map(
-            (face) =>
+            face =>
               nets.faceExpressionNet.predictExpressions(
                 face
               ) as Promise<FaceExpressions>
@@ -95,7 +95,7 @@ export class PredictSingleFaceExpressionsTask<
     >(
       parentResult,
       this.input,
-      (face) =>
+      face =>
         nets.faceExpressionNet.predictExpressions(
           face
         ) as Promise<FaceExpressions>,

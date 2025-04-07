@@ -36,7 +36,7 @@ function extractBoundingBoxes(
     }
   }
 
-  const boundingBoxes = indices.map((idx) => {
+  const boundingBoxes = indices.map(idx => {
     const cell = new BoundingBox(
       Math.round((idx.y * CELL_STRIDE + 1) / scale),
       Math.round((idx.x * CELL_STRIDE + 1) / scale),
@@ -73,7 +73,7 @@ export function stage1(
 ) {
   stats.stage1 = [];
 
-  const pnetOutputs = scales.map((scale) =>
+  const pnetOutputs = scales.map(scale =>
     tf.tidy(() => {
       const statsForScale: any = { scale };
       const resized = rescaleAndNormalize(imgTensor, scale);
@@ -113,15 +113,15 @@ export function stage1(
 
       let ts = Date.now();
       const indices = nonMaxSuppression(
-        boundingBoxes.map((bbox) => bbox.cell),
-        boundingBoxes.map((bbox) => bbox.score),
+        boundingBoxes.map(bbox => bbox.cell),
+        boundingBoxes.map(bbox => bbox.score),
         0.5
       );
       statsForScale.nms = Date.now() - ts;
       statsForScale.numBoxes = indices.length;
 
       stats.stage1.push(statsForScale);
-      return indices.map((boxIdx) => boundingBoxes[boxIdx]);
+      return indices.map(boxIdx => boundingBoxes[boxIdx]);
     }
   );
 
@@ -133,15 +133,15 @@ export function stage1(
   if (allBoxes.length > 0) {
     let ts = Date.now();
     const indices = nonMaxSuppression(
-      allBoxes.map((bbox) => bbox.cell),
-      allBoxes.map((bbox) => bbox.score),
+      allBoxes.map(bbox => bbox.cell),
+      allBoxes.map(bbox => bbox.score),
       0.7
     );
     stats.stage1_nms = Date.now() - ts;
 
-    finalScores = indices.map((idx) => allBoxes[idx].score);
+    finalScores = indices.map(idx => allBoxes[idx].score);
     finalBoxes = indices
-      .map((idx) => allBoxes[idx])
+      .map(idx => allBoxes[idx])
       .map(({ cell, region }) =>
         new BoundingBox(
           cell.left + region.left * cell.width,

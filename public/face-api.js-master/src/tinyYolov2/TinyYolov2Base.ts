@@ -143,20 +143,20 @@ export class TinyYolov2Base extends NeuralNetwork<TinyYolov2NetParams> {
     out.dispose();
     out0.dispose();
 
-    const boxes = results.map((res) => res.box);
-    const scores = results.map((res) => res.score);
-    const classScores = results.map((res) => res.classScore);
-    const classNames = results.map((res) => this.config.classes[res.label]);
+    const boxes = results.map(res => res.box);
+    const scores = results.map(res => res.score);
+    const classScores = results.map(res => res.classScore);
+    const classNames = results.map(res => this.config.classes[res.label]);
 
     const indices = nonMaxSuppression(
-      boxes.map((box) => box.rescale(inputSize)),
+      boxes.map(box => box.rescale(inputSize)),
       scores,
       this.config.iouThreshold,
       true
     );
 
     const detections = indices.map(
-      (idx) =>
+      idx =>
         new ObjectDetection(
           scores[idx],
           classScores[idx],

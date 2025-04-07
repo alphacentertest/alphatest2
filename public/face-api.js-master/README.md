@@ -481,7 +481,7 @@ const results = await faceapi
   .withFaceLandmarks()
   .withFaceDescriptors();
 
-results.forEach((fd) => {
+results.forEach(fd => {
   const bestMatch = faceMatcher.findBestMatch(fd.descriptor);
   console.log(bestMatch.toString());
 });

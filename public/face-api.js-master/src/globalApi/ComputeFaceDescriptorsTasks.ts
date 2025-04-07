@@ -49,17 +49,17 @@ export class ComputeAllFaceDescriptorsTask<
     >(
       parentResults,
       this.input,
-      (faces) =>
+      faces =>
         Promise.all(
           faces.map(
-            (face) =>
+            face =>
               nets.faceRecognitionNet.computeFaceDescriptor(
                 face
               ) as Promise<Float32Array>
           )
         ),
       null,
-      (parentResult) =>
+      parentResult =>
         parentResult.landmarks.align(null, { useDlibAlignment: true })
     );
 
@@ -94,12 +94,12 @@ export class ComputeSingleFaceDescriptorTask<
     >(
       parentResult,
       this.input,
-      (face) =>
+      face =>
         nets.faceRecognitionNet.computeFaceDescriptor(
           face
         ) as Promise<Float32Array>,
       null,
-      (parentResult) =>
+      parentResult =>
         parentResult.landmarks.align(null, { useDlibAlignment: true })
     );
 

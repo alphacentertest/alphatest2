@@ -16,7 +16,7 @@ async function extractImages() {
         if (images.length > 0) {
           for (const imageRef of images) {
             const image = workbook.model.media.find(
-              (m) => m.index === imageRef.imageId
+              m => m.index === imageRef.imageId
             );
             if (image && image.buffer) {
               const imagePath = path.join(

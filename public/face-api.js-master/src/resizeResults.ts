@@ -20,7 +20,7 @@ export function resizeResults<T>(results: T, dimensions: IDimensions): T {
   }
 
   if (Array.isArray(results)) {
-    return results.map((obj) =>
+    return results.map(obj =>
       resizeResults(obj, { width, height })
     ) as any as T;
   }

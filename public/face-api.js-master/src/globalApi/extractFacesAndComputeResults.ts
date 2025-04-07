@@ -22,7 +22,7 @@ export async function extractAllFacesAndComputeResults<
     parentResult: WithFaceLandmarks<TSource, any>
   ) => FaceDetection = ({ alignedRect }) => alignedRect
 ) {
-  const faceBoxes = parentResults.map((parentResult) =>
+  const faceBoxes = parentResults.map(parentResult =>
     isWithFaceLandmarks(parentResult)
       ? getRectForAlignment(parentResult)
       : parentResult.detection
@@ -35,7 +35,7 @@ export async function extractAllFacesAndComputeResults<
 
   const results = await computeResults(faces);
 
-  faces.forEach((f) => f instanceof tf.Tensor && f.dispose());
+  faces.forEach(f => f instanceof tf.Tensor && f.dispose());
 
   return results;
 }
@@ -55,7 +55,7 @@ export async function extractSingleFaceAndComputeResult<
   return extractAllFacesAndComputeResults<TSource, TResult>(
     [parentResult],
     input,
-    async (faces) => computeResult(faces[0]),
+    async faces => computeResult(faces[0]),
     extractedFaces,
     getRectForAlignment
   );

@@ -22,7 +22,7 @@ export async function stage3(
   stats.stage3_extractImagePatches = Date.now() - ts;
 
   ts = Date.now();
-  const onetOuts = onetInputs.map((onetInput) => {
+  const onetOuts = onetInputs.map(onetInput => {
     const out = ONet(onetInput, params);
     onetInput.dispose();
     return out;
@@ -31,17 +31,17 @@ export async function stage3(
 
   const scoresTensor =
     onetOuts.length > 1
-      ? tf.concat(onetOuts.map((out) => out.scores))
+      ? tf.concat(onetOuts.map(out => out.scores))
       : onetOuts[0].scores;
   const scores = Array.from(await scoresTensor.data());
   scoresTensor.dispose();
 
   const indices = scores
     .map((score, idx) => ({ score, idx }))
-    .filter((c) => c.score > scoreThreshold)
+    .filter(c => c.score > scoreThreshold)
     .map(({ idx }) => idx);
 
-  const filteredRegions = indices.map((idx) => {
+  const filteredRegions = indices.map(idx => {
     const regionsData = onetOuts[idx].regions.arraySync();
     return new MtcnnBox(
       regionsData[0][0],
@@ -53,7 +53,7 @@ export async function stage3(
   const filteredBoxes = indices.map((idx, i) =>
     inputBoxes[idx].calibrate(filteredRegions[i])
   );
-  const filteredScores = indices.map((idx) => scores[idx]);
+  const filteredScores = indices.map(idx => scores[idx]);
 
   let finalBoxes: Box[] = [];
   let finalScores: number[] = [];
@@ -69,8 +69,8 @@ export async function stage3(
     );
     stats.stage3_nms = Date.now() - ts;
 
-    finalBoxes = indicesNms.map((idx) => filteredBoxes[idx]);
-    finalScores = indicesNms.map((idx) => filteredScores[idx]);
+    finalBoxes = indicesNms.map(idx => filteredBoxes[idx]);
+    finalScores = indicesNms.map(idx => filteredScores[idx]);
     points = indicesNms.map((idx, i) =>
       Array(5)
         .fill(0)
@@ -86,7 +86,7 @@ export async function stage3(
     );
   }
 
-  onetOuts.forEach((t) => {
+  onetOuts.forEach(t => {
     t.regions.dispose();
     t.scores.dispose();
     t.points.dispose();

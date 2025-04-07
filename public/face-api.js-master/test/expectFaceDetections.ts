@@ -14,7 +14,7 @@ export function expectFaceDetections(
       score,
       ...allExpectedFaceDetections[i],
     }))
-    .filter((expected) => expected.score !== -1);
+    .filter(expected => expected.score !== -1);
 
   const sortedResults = sortFaceDetections(results);
 

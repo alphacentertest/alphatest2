@@ -68,7 +68,7 @@ export class DrawTextField {
     const { padding } = this.options;
     return (
       this.text
-        .map((l) => ctx.measureText(l).width)
+        .map(l => ctx.measureText(l).width)
         .reduce((w0, w1) => (w0 < w1 ? w1 : w0), 0) +
       2 * padding
     );

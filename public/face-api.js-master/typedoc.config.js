@@ -34,9 +34,9 @@ const exclude = excludes
   .map(({ dir, exceptions }) => {
     const files = fs
       .readdirSync(path.resolve('src', dir))
-      .filter((file) => !exceptions.some((ex) => ex === file));
+      .filter(file => !exceptions.some(ex => ex === file));
 
-    return files.map((file) => `**/${dir}/${file}`);
+    return files.map(file => `**/${dir}/${file}`);
   })
   .reduce((flat, arr) => flat.concat(arr), []);
 

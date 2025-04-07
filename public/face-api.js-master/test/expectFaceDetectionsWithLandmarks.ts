@@ -28,7 +28,7 @@ export function expectFaceDetectionsWithLandmarks<
       score,
       ...allExpectedFullFaceDescriptions[i],
     }))
-    .filter((expected) => expected.score !== -1);
+    .filter(expected => expected.score !== -1);
 
   const sortedResults = sortByFaceDetection(results);
 

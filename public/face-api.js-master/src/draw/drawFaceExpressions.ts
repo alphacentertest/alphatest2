@@ -22,7 +22,7 @@ export function drawFaceExpressions(
     ? faceExpressions
     : [faceExpressions];
 
-  faceExpressionsArray.forEach((e) => {
+  faceExpressionsArray.forEach(e => {
     const expr =
       e instanceof FaceExpressions
         ? e
@@ -37,7 +37,7 @@ export function drawFaceExpressions(
 
     const sorted = expr.asSortedArray();
     const resultsToDisplay = sorted.filter(
-      (expr) => expr.probability > minConfidence
+      expr => expr.probability > minConfidence
     );
 
     const anchor = isWithFaceDetection(e)
@@ -46,7 +46,7 @@ export function drawFaceExpressions(
 
     const drawTextField = new DrawTextField(
       resultsToDisplay.map(
-        (expr) => `${expr.expression} (${round(expr.probability)})`
+        expr => `${expr.expression} (${round(expr.probability)})`
       ),
       anchor
     );

@@ -50,7 +50,7 @@ export class DetectAllFaceLandmarksTask<
 > extends DetectFaceLandmarksTaskBase<WithFaceLandmarks<TSource>[], TSource[]> {
   public async run(): Promise<WithFaceLandmarks<TSource>[]> {
     const parentResults = await this.parentTask;
-    const detections = parentResults.map((res) => res.detection);
+    const detections = parentResults.map(res => res.detection);
 
     const faces: Array<HTMLCanvasElement | tf.Tensor3D> =
       this.input instanceof tf.Tensor
@@ -58,10 +58,10 @@ export class DetectAllFaceLandmarksTask<
         : await extractFaces(this.input, detections);
 
     const faceLandmarksByFace = (await Promise.all(
-      faces.map((face) => this.landmarkNet.detectLandmarks(face))
+      faces.map(face => this.landmarkNet.detectLandmarks(face))
     )) as FaceLandmarks68[];
 
-    faces.forEach((f) => f instanceof tf.Tensor && f.dispose());
+    faces.forEach(f => f instanceof tf.Tensor && f.dispose());
 
     return parentResults.map((parentResult, i) =>
       extendWithFaceLandmarks<TSource>(parentResult, faceLandmarksByFace[i])
@@ -103,7 +103,7 @@ export class DetectSingleFaceLandmarksTask<
       faces[0]
     )) as FaceLandmarks68;
 
-    faces.forEach((f) => f instanceof tf.Tensor && f.dispose());
+    faces.forEach(f => f instanceof tf.Tensor && f.dispose());
 
     return extendWithFaceLandmarks<TSource>(parentResult, landmarks);
   }

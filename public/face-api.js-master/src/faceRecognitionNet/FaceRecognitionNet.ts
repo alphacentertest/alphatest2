@@ -71,10 +71,10 @@ export class FaceRecognitionNet extends NeuralNetwork<NetParams> {
     );
 
     const faceDescriptorsForBatch = (await Promise.all(
-      faceDescriptorTensors.map((t) => t.data())
+      faceDescriptorTensors.map(t => t.data())
     )) as Float32Array[];
 
-    faceDescriptorTensors.forEach((t) => t.dispose());
+    faceDescriptorTensors.forEach(t => t.dispose());
 
     return netInput.isBatchInput
       ? faceDescriptorsForBatch

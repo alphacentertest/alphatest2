@@ -24,7 +24,7 @@ export function getModelUris(
       : '';
   uri = uri.replace(protocol, '');
 
-  const parts = uri.split('/').filter((s) => s);
+  const parts = uri.split('/').filter(s => s);
 
   const manifestFile = uri.endsWith('.json')
     ? parts[parts.length - 1]

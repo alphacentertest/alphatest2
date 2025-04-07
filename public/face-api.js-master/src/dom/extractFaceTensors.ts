@@ -34,12 +34,12 @@ export async function extractFaceTensors(
     );
 
     const boxes = detections
-      .map((det) =>
+      .map(det =>
         det instanceof FaceDetection
           ? det.forSize(imgWidth, imgHeight).box
           : det
       )
-      .map((box) => box.clipAtImageBorders(imgWidth, imgHeight));
+      .map(box => box.clipAtImageBorders(imgWidth, imgHeight));
 
     const faceTensors = boxes.map(({ x, y, width, height }) =>
       tf.slice3d(

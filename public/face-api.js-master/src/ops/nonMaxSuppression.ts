@@ -10,7 +10,7 @@ export function nonMaxSuppression(
   let indicesSortedByScore = scores
     .map((score, boxIndex) => ({ score, boxIndex }))
     .sort((c1, c2) => c1.score - c2.score)
-    .map((c) => c.boxIndex);
+    .map(c => c.boxIndex);
 
   const pick: number[] = [];
 
