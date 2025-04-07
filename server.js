@@ -6,7 +6,6 @@ const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs').promises; // Асинхронні методи fs
 const fsSync = require('fs'); // Синхронні методи fs
-const Redis = require('ioredis');
 const logger = require(path.join(__dirname, 'logger'));
 const AWS = require('aws-sdk');
 const { put, list } = require('@vercel/blob');
@@ -19,6 +18,7 @@ const csrf = require('csurf');
 const session = require('express-session');
 const RedisStore = require('connect-redis').default; // Новий синтаксис для connect-redis@7.x
 require('dotenv').config();
+const Redis = require('ioredis');
 
 // Перевірка необхідних змінних середовища
 const requiredEnvVars = [
@@ -117,39 +117,6 @@ const waitForRedis = () => {
   });
 };
 
-// Обробники подій Redis
-redis.on('connect', () => {
-  logger.info('Redis успішно підключений');
-});
-
-redis.on('ready', () => {
-  redisReady = true;
-  logger.info('Redis готовий приймати команди');
-});
-
-redis.on('error', err => {
-  redisReady = false;
-  logger.error('Помилка Redis:', {
-    message: err.message,
-    stack: err.stack,
-    status: redis.status,
-    redisUrl: process.env.REDIS_URL
-      ? process.env.REDIS_URL.replace(/:[^@]+@/, ':<password>@')
-      : 'Не встановлено',
-    tlsConfig: redis.options.tls || 'Не встановлено',
-  });
-});
-
-redis.on('reconnecting', () => {
-  redisReady = false;
-  logger.warn('Redis пере підключенням...');
-});
-
-redis.on('end', () => {
-  redisReady = false;
-  logger.warn('З’єднання з Redis закрито');
-});
-
 // Налаштування AWS S3
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -158,9 +125,7 @@ const s3 = new AWS.S3({
 });
 
 // Базовий URL для Vercel Blob Storage
-const BLOB_BASE_URL =
-  process.env.BLOB_BASE_URL ||
-  'https://qqeygegbb01p35fz.public.blob.vercel-storage.com';
+const BLOB_BASE_URL = process.env.BLOB_BASE_URL || 'https://qqeygegbb01p35fz.public.blob.vercel-storage.com';
 
 // Динамічний імпорт для node-fetch
 const getFetch = async () => {
@@ -197,63 +162,60 @@ const sessionOptions = {
       ...sessionOptions,
       store: new RedisStore({ client: redis }),
     }));
+    logger.info('Сесії налаштовані з Redis');
   } catch (error) {
     logger.warn('Redis недоступний, використовуємо пам’ять для зберігання сесій');
     app.use(session(sessionOptions));
   }
-})();
 
-// Якщо Redis доступний, використовуємо RedisStore, інакше пам’ять
-if (redisReady) {
-  app.use(
-    session({
-      ...sessionOptions,
-      store: new RedisStore({ client: redis }),
-    })
-  );
-} else {
-  logger.warn('Redis недоступний, використовуємо пам’ять для зберігання сесій');
-  app.use(session(sessionOptions));
-}
-
-// Налаштування CSRF-захисту
-const csrfProtection = csrf({ cookie: false });
-app.use(csrfProtection);
-
-// Логування запитів та фільтрація XSS
-app.use((req, res, next) => {
-  const startTime = Date.now();
-  logger.info(`${req.method} ${req.url} - IP: ${req.ip}`);
-
-  // Фільтрація XSS для параметрів запиту
-  for (const key in req.query) {
-    if (typeof req.query[key] === 'string') {
-      req.query[key] = xss(req.query[key]);
+  // Налаштування CSRF-захисту після сесій
+  const csrfProtection = csrf({ cookie: false });
+  // Додаємо CSRF-захист для всіх маршрутів, крім /login (тимчасово для відладки)
+  app.use((req, res, next) => {
+    if (req.path === '/login') {
+      return next();
     }
-  }
-
-  // Фільтрація XSS для тіла запиту
-  for (const key in req.body) {
-    if (typeof req.body[key] === 'string') {
-      req.body[key] = xss(req.body[key]);
-    }
-  }
-
-  res.on('finish', () => {
-    logger.info(
-      `${req.method} ${req.url} завершено за ${Date.now() - startTime}мс зі статусом ${res.statusCode}`
-    );
+    csrfProtection(req, res, next);
   });
-  next();
-});
 
-// Обмеження кількості запитів для маршруту входу
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: 'Занадто багато спроб входу, спробуйте знову через 15 хвилин',
-});
-app.use('/login', loginLimiter);
+  // Логування запитів та фільтрація XSS
+  app.use((req, res, next) => {
+    const startTime = Date.now();
+    logger.info(`${req.method} ${req.url} - IP: ${req.ip}`);
+
+    // Логування CSRF-токена для відладки
+    if (req.method === 'POST') {
+      logger.info(`CSRF-токен у запиті: ${req.body._csrf || 'відсутній'}`);
+    }
+
+    // Фільтрація XSS для параметрів запиту
+    for (const key in req.query) {
+      if (typeof req.query[key] === 'string') {
+        req.query[key] = xss(req.query[key]);
+      }
+    }
+
+    // Фільтрація XSS для тіла запиту
+    for (const key in req.body) {
+      if (typeof req.body[key] === 'string') {
+        req.body[key] = xss(req.body[key]);
+      }
+    }
+
+    res.on('finish', () => {
+      logger.info(`${req.method} ${req.url} завершено за ${Date.now() - startTime}мс зі статусом ${res.statusCode}`);
+    });
+    next();
+  });
+
+  // Обмеження кількості запитів для маршруту входу
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: 'Занадто багато спроб входу, спробуйте знову через 15 хвилин',
+  });
+  app.use('/login', loginLimiter);
+})();
 
 // Налаштування Multer для завантаження файлів
 const uploadDir = '/tmp/uploads';
@@ -267,10 +229,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(
-      null,
-      file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname)
-    );
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
   },
 });
 const upload = multer({ storage });
@@ -300,7 +259,8 @@ app.use((req, res, next) => {
     req.path === '/node-version' ||
     req.path === '/' ||
     req.path === '/favicon.ico' ||
-    req.path === '/favicon.png'
+    req.path === '/favicon.png' ||
+    req.path === '/test-redis'
   ) {
     return next();
   }
@@ -325,17 +285,13 @@ const listVercelBlobs = async () => {
     const result = await list({
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
-    logger.info(
-      `Успішно отримано ${result.blobs.length} файлів з Vercel Blob Storage`
-    );
+    logger.info(`Успішно отримано ${result.blobs.length} файлів з Vercel Blob Storage`);
     return result.blobs || [];
   } catch (error) {
     logger.error('Не вдалося отримати список файлів з Vercel Blob Storage:', {
       message: error.message,
       stack: error.stack,
-      token: process.env.BLOB_READ_WRITE_TOKEN
-        ? 'Токен присутній'
-        : 'Токен відсутній',
+      token: process.env.BLOB_READ_WRITE_TOKEN ? 'Токен присутній' : 'Токен відсутній',
     });
     throw error;
   }
@@ -349,8 +305,7 @@ const loadTestNames = async () => {
   try {
     const blobs = await listVercelBlobs();
     const questionFiles = blobs.filter(
-      blob =>
-        blob.pathname.startsWith('questions') && blob.pathname.endsWith('.xlsx')
+      blob => blob.pathname.startsWith('questions') && blob.pathname.endsWith('.xlsx')
     );
 
     testNames = {};
@@ -368,21 +323,13 @@ const loadTestNames = async () => {
         await redis.set('testNames', JSON.stringify(testNames));
         logger.info('Назви тестів збережено в Redis');
       } catch (redisError) {
-        logger.error(
-          `Помилка збереження назв тестів у Redis: ${redisError.message}`,
-          { stack: redisError.stack }
-        );
+        logger.error(`Помилка збереження назв тестів у Redis: ${redisError.message}`, { stack: redisError.stack });
       }
     }
 
-    logger.info(
-      `Завантажено ${Object.keys(testNames).length} тестів динамічно, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`Завантажено ${Object.keys(testNames).length} тестів динамічно, тривалість ${Date.now() - startTime}мс`);
   } catch (error) {
-    logger.error(
-      `Не вдалося завантажити назви тестів, тривалість ${Date.now() - startTime}мс: ${error.message}`,
-      { stack: error.stack }
-    );
+    logger.error(`Не вдалося завантажити назви тестів, тривалість ${Date.now() - startTime}мс: ${error.message}`, { stack: error.stack });
     testNames = {};
   }
 };
@@ -398,16 +345,11 @@ const loadUsers = async () => {
       try {
         const cachedUsers = await redis.get(cacheKey);
         if (cachedUsers) {
-          logger.info(
-            `Користувачі завантажені з кешу Redis, тривалість ${Date.now() - startTime}мс`
-          );
+          logger.info(`Користувачі завантажені з кешу Redis, тривалість ${Date.now() - startTime}мс`);
           return JSON.parse(cachedUsers);
         }
       } catch (redisError) {
-        logger.error(
-          `Помилка отримання користувачів з кешу Redis: ${redisError.message}`,
-          { stack: redisError.stack }
-        );
+        logger.error(`Помилка отримання користувачів з кешу Redis: ${redisError.message}`, { stack: redisError.stack });
       }
     } else {
       logger.warn('Redis недоступний, пропускаємо перевірку кешу');
@@ -425,19 +367,16 @@ const loadUsers = async () => {
     const fetch = await getFetch();
     const response = await fetch(blobUrl);
     if (!response.ok) {
-      throw new Error(
-        `Не вдалося завантажити файл ${blobUrl}: ${response.statusText}`
-      );
+      throw new Error(`Не вдалося завантажити файл ${blobUrl}: ${response.statusText}`);
     }
     const buffer = Buffer.from(await response.arrayBuffer());
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
 
-    let sheet =
-      workbook.getWorksheet('Users') || workbook.getWorksheet('Sheet1');
+    let sheet = workbook.getWorksheet('Users');
     if (!sheet) {
-      logger.warn('Аркуш "Users" або "Sheet1" не знайдено');
+      logger.warn('Аркуш "Users" не знайдено');
       return [];
     }
 
@@ -462,24 +401,16 @@ const loadUsers = async () => {
         await redis.set(cacheKey, JSON.stringify(users), 'EX', 3600);
         logger.info(`Користувачі збережені в кеш Redis`);
       } catch (redisError) {
-        logger.error(
-          `Помилка збереження користувачів у Redis: ${redisError.message}`,
-          { stack: redisError.stack }
-        );
+        logger.error(`Помилка збереження користувачів у Redis: ${redisError.message}`, { stack: redisError.stack });
       }
     } else {
       logger.warn('Redis недоступний, пропускаємо збереження в кеш');
     }
 
-    logger.info(
-      `Завантажено ${users.length} користувачів з Vercel Blob Storage, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`Завантажено ${users.length} користувачів з Vercel Blob Storage, тривалість ${Date.now() - startTime}мс`);
     return users;
   } catch (error) {
-    logger.error(
-      `Помилка завантаження користувачів з Blob Storage, тривалість ${Date.now() - startTime}мс: ${error.message}`,
-      { stack: error.stack }
-    );
+    logger.error(`Помилка завантаження користувачів з Blob Storage, тривалість ${Date.now() - startTime}мс: ${error.message}`, { stack: error.stack });
     return [];
   }
 };
@@ -491,9 +422,7 @@ const loadQuestions = async questionsFile => {
   logger.info(`Завантаження питань для ${questionsFile}`);
 
   if (questionsByTestCache[questionsFile]) {
-    logger.info(
-      `Питання для ${questionsFile} завантажені з кешу програми, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`Питання для ${questionsFile} завантажені з кешу програми, тривалість ${Date.now() - startTime}мс`);
     return questionsByTestCache[questionsFile];
   }
 
@@ -502,18 +431,13 @@ const loadQuestions = async questionsFile => {
       try {
         const cachedQuestions = await redis.get(cacheKey);
         if (cachedQuestions) {
-          logger.info(
-            `Питання для ${questionsFile} завантажені з кешу Redis, тривалість ${Date.now() - startTime}мс`
-          );
+          logger.info(`Питання для ${questionsFile} завантажені з кешу Redis, тривалість ${Date.now() - startTime}мс`);
           const questions = JSON.parse(cachedQuestions);
           questionsByTestCache[questionsFile] = questions;
           return questions;
         }
       } catch (redisError) {
-        logger.error(
-          `Помилка отримання питань з кешу Redis для ${questionsFile}: ${redisError.message}`,
-          { stack: redisError.stack }
-        );
+        logger.error(`Помилка отримання питань з кешу Redis для ${questionsFile}: ${redisError.message}`, { stack: redisError.stack });
       }
     }
 
@@ -522,17 +446,14 @@ const loadQuestions = async questionsFile => {
     const fetch = await getFetch();
     const response = await fetch(blobUrl);
     if (!response.ok) {
-      throw new Error(
-        `Не вдалося завантажити файл ${blobUrl}: ${response.statusText}`
-      );
+      throw new Error(`Не вдалося завантажити файл ${blobUrl}: ${response.statusText}`);
     }
     const buffer = Buffer.from(await response.arrayBuffer());
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
 
-    let sheet =
-      workbook.getWorksheet('Questions') || workbook.getWorksheet('Sheet1');
+    let sheet = workbook.getWorksheet('Questions') || workbook.getWorksheet('Sheet1');
     if (!sheet) {
       logger.warn('Аркуш "Questions" або "Sheet1" не знайдено');
       return [];
@@ -541,33 +462,27 @@ const loadQuestions = async questionsFile => {
     const questions = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber > 1) {
+        const pictureNumber = String(row.getCell(1).value || '').trim();
+        const picture = pictureNumber ? `/images/Picture${pictureNumber}.png` : null;
         const question = {
-          text: String(row.getCell(1).value || '').trim(),
-          picture: row.getCell(2).value
-            ? String(row.getCell(2).value).trim()
-            : null,
-          type: String(row.getCell(3).value || 'single')
-            .trim()
-            .toLowerCase(),
+          picture: picture,
+          text: String(row.getCell(2).value || '').trim(),
+          type: String(row.getCell(27).value || 'multiple').trim().toLowerCase(),
           options: [],
           correctAnswers: [],
-          points: parseInt(row.getCell(8).value) || 1,
+          points: parseInt(row.getCell(28).value) || 1, // Читаем очки из 28-го столбца
         };
 
-        for (let i = 4; i <= 7; i++) {
+        // Читаем варианты ответа (столбцы 3–14)
+        for (let i = 3; i <= 14; i++) {
           const option = row.getCell(i).value;
           if (option) question.options.push(String(option).trim());
         }
 
-        const correctAnswer = row.getCell(9).value;
-        if (correctAnswer) {
-          if (question.type === 'multiple' || question.type === 'ordering') {
-            question.correctAnswers = String(correctAnswer)
-              .split(',')
-              .map(a => a.trim());
-          } else {
-            question.correctAnswers = [String(correctAnswer).trim()];
-          }
+        // Читаем правильные ответы (столбцы 15–26)
+        for (let i = 15; i <= 26; i++) {
+          const correctAnswer = row.getCell(i).value;
+          if (correctAnswer) question.correctAnswers.push(String(correctAnswer).trim());
         }
 
         if (question.text) questions.push(question);
@@ -584,23 +499,15 @@ const loadQuestions = async questionsFile => {
         await redis.set(cacheKey, JSON.stringify(questions), 'EX', 3600);
         logger.info(`Питання для ${questionsFile} збережені в кеш Redis`);
       } catch (redisError) {
-        logger.error(
-          `Помилка збереження питань у Redis для ${questionsFile}: ${redisError.message}`,
-          { stack: redisError.stack }
-        );
+        logger.error(`Помилка збереження питань у Redis для ${questionsFile}: ${redisError.message}`, { stack: redisError.stack });
       }
     }
 
     questionsByTestCache[questionsFile] = questions;
-    logger.info(
-      `Завантажено ${questions.length} питань з ${questionsFile}, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`Завантажено ${questions.length} питань з ${questionsFile}, тривалість ${Date.now() - startTime}мс`);
     return questions;
   } catch (error) {
-    logger.error(
-      `Помилка завантаження питань з ${questionsFile}, тривалість ${Date.now() - startTime}мс: ${error.message}`,
-      { stack: error.stack }
-    );
+    logger.error(`Помилка завантаження питань з ${questionsFile}, тривалість ${Date.now() - startTime}мс: ${error.message}`, { stack: error.stack });
     return [];
   }
 };
@@ -615,10 +522,7 @@ const getUserTest = async user => {
     const testData = await redis.hget('userTests', user);
     return testData ? JSON.parse(testData) : null;
   } catch (error) {
-    logger.error(
-      `Помилка отримання тесту користувача з Redis: ${error.message}`,
-      { stack: error.stack }
-    );
+    logger.error(`Помилка отримання тесту користувача з Redis: ${error.message}`, { stack: error.stack });
     return null;
   }
 };
@@ -631,10 +535,7 @@ const setUserTest = async (user, testData) => {
   try {
     await redis.hset('userTests', user, JSON.stringify(testData));
   } catch (error) {
-    logger.error(
-      `Помилка збереження тесту користувача в Redis: ${error.message}`,
-      { stack: error.stack }
-    );
+    logger.error(`Помилка збереження тесту користувача в Redis: ${error.message}`, { stack: error.stack });
   }
 };
 
@@ -646,10 +547,7 @@ const deleteUserTest = async user => {
   try {
     await redis.hdel('userTests', user);
   } catch (error) {
-    logger.error(
-      `Помилка видалення тесту користувача з Redis: ${error.message}`,
-      { stack: error.stack }
-    );
+    logger.error(`Помилка видалення тесту користувача з Redis: ${error.message}`, { stack: error.stack });
   }
 };
 
@@ -682,10 +580,9 @@ const saveResult = async (
     answers,
     scoresPerQuestion: questions.map((q, idx) => {
       const userAnswer = answers[idx];
-      if (!q.options || q.options.length === 0) {
+      if (q.type === 'input') {
         return userAnswer &&
-          String(userAnswer).trim().toLowerCase() ===
-            String(q.correctAnswers[0]).trim().toLowerCase()
+          String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()
           ? q.points
           : 0;
       } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
@@ -703,10 +600,6 @@ const saveResult = async (
           correctAnswers.every((val, idx) => val === userAnswers[idx])
           ? q.points
           : 0;
-      } else if (q.type === 'single' && userAnswer) {
-        return String(userAnswer).trim() === String(q.correctAnswers[0]).trim()
-          ? q.points
-          : 0;
       }
       return 0;
     }),
@@ -714,10 +607,7 @@ const saveResult = async (
   try {
     await redis.rpush('test_results', JSON.stringify(result));
   } catch (error) {
-    logger.error(
-      `Помилка збереження результату тесту в Redis: ${error.message}`,
-      { stack: error.stack }
-    );
+    logger.error(`Помилка збереження результату тесту в Redis: ${error.message}`, { stack: error.stack });
   }
 };
 
@@ -734,12 +624,8 @@ const checkAuth = (req, res, next) => {
 // Middleware для перевірки адмін-доступу через сесію
 const checkAdmin = (req, res, next) => {
   if (!req.session.user || req.session.user !== 'admin') {
-    logger.warn(
-      `Спроба несанкціонованого доступу до адмін-панелі користувачем: ${req.session.user || 'невідомий'}`
-    );
-    return res
-      .status(403)
-      .send('Доступ заборонено. Тільки для адміністратора.');
+    logger.warn(`Спроба несанкціонованого доступу до адмін-панелі користувачем: ${req.session.user || 'невідомий'}`);
+    return res.status(403).send('Доступ заборонено. Тільки для адміністратора.');
   }
   req.user = req.session.user;
   next();
@@ -752,13 +638,16 @@ const initializePasswords = async () => {
 
   validPasswords['admin'] = process.env.ADMIN_PASSWORD_HASH;
 
-  users.forEach(user => {
-    validPasswords[user.username] = user.password;
-  });
+  for (const user of users) {
+    try {
+      const hashedPassword = await bcrypt.hash(user.password, 10);
+      validPasswords[user.username] = hashedPassword;
+    } catch (error) {
+      logger.error(`Помилка хешування пароля для користувача ${user.username}: ${error.message}`, { stack: error.stack });
+    }
+  }
 
-  logger.info(
-    `Ініціалізовано паролі для ${Object.keys(validPasswords).length} користувачів`
-  );
+  logger.info(`Ініціалізовано паролі для ${Object.keys(validPasswords).length} користувачів`);
 };
 
 // Ініціалізація сервера
@@ -769,6 +658,8 @@ const initializeServer = async () => {
     if (!process.env[envVar]) {
       logger.error(`Відсутня необхідна змінна середовища: ${envVar}`);
       process.exit(1);
+    } else {
+      logger.info(`Змінна середовища ${envVar} присутня: ${envVar === 'REDIS_URL' ? process.env[envVar].replace(/:[^@]+@/, ':<password>@') : 'значення приховане'}`);
     }
   }
 
@@ -794,18 +685,24 @@ const initializeServer = async () => {
     } else {
       await loadTestNames();
     }
+    if (Object.keys(testNames).length === 0) {
+      logger.warn('Не знайдено жодного тесту. Перевірте наявність файлів questions*.xlsx у Vercel Blob Storage.');
+    }
   } catch (error) {
     logger.error('Не вдалося завантажити назви тестів:', { message: error.message, stack: error.stack });
-    testNames = {}; // Продовжуємо роботу, навіть якщо тесты не загрузились
+    testNames = {};
   }
 
   logger.info('Завантаження користувачів...');
   try {
     users = await loadUsers();
+    if (users.length === 0) {
+      logger.warn('Не знайдено жодного користувача. Перевірте наявність файлу users.xlsx у Vercel Blob Storage.');
+    }
     await initializePasswords();
   } catch (error) {
     logger.error('Не вдалося завантажити користувачів:', { message: error.message, stack: error.stack });
-    users = []; // Продовжуємо роботу, навіть якщо користувачі не загрузились
+    users = [];
   }
 
   logger.info('Ініціалізація сервера завершена');
@@ -844,12 +741,8 @@ app.get('/', async (req, res) => {
     }
 
     if (req.session.user) {
-      logger.info(
-        `Користувач уже авторизований, перенаправляємо, тривалість ${Date.now() - startTime}мс`
-      );
-      return res.redirect(
-        req.session.user === 'admin' ? '/admin' : '/select-test'
-      );
+      logger.info(`Користувач уже авторизований, перенаправляємо, тривалість ${Date.now() - startTime}мс`);
+      return res.redirect(req.session.user === 'admin' ? '/admin' : '/select-test');
     }
 
     const savedPassword = req.cookies.savedPassword || '';
@@ -973,10 +866,7 @@ app.get('/', async (req, res) => {
       </html>
     `);
   } catch (err) {
-    logger.error(
-      `Помилка в GET /, тривалість ${Date.now() - startTime}мс: ${err.message}`,
-      { stack: err.stack }
-    );
+    logger.error(`Помилка в GET /, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
     res.status(500).send('Помилка сервера');
   }
 });
@@ -991,9 +881,7 @@ app.post(
       .withMessage('Пароль не може бути порожнім')
       .isLength({ min: 3, max: 50 })
       .withMessage('Пароль має бути від 3 до 50 символів'),
-    body('rememberMe')
-      .isBoolean()
-      .withMessage('rememberMe має бути булевим значенням'),
+    body('rememberMe').isBoolean().withMessage('rememberMe має бути булевим значенням'),
   ],
   async (req, res) => {
     const startTime = Date.now();
@@ -1081,17 +969,40 @@ app.get('/health', async (req, res) => {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     });
-    logger.info(
-      `GET /health завершено, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`GET /health завершено, тривалість ${Date.now() - startTime}мс`);
   } catch (error) {
-    logger.error(
-      `Помилка в GET /health, тривалість ${Date.now() - startTime}мс: ${error.message}`,
-      { stack: error.stack }
-    );
+    logger.error(`Помилка в GET /health, тривалість ${Date.now() - startTime}мс: ${error.message}`, { stack: error.stack });
     res.status(500).json({
       status: 'Помилка',
       message: 'Перевірка стану не вдалася',
+      error: error.message,
+    });
+  }
+});
+
+// Тестовий маршрут для перевірки Redis
+app.get('/test-redis', async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Обробка GET /test-redis');
+
+  try {
+    if (!redisReady) {
+      throw new Error('Redis недоступний');
+    }
+    await redis.set('test-key', 'test-value');
+    const value = await redis.get('test-key');
+    res.status(200).json({
+      status: 'OK',
+      redisStatus: 'Підключений',
+      testValue: value,
+      timestamp: new Date().toISOString(),
+    });
+    logger.info(`GET /test-redis завершено, тривалість ${Date.now() - startTime}мс`);
+  } catch (error) {
+    logger.error(`Помилка в GET /test-redis: ${error.message}`, { stack: error.stack });
+    res.status(500).json({
+      status: 'Помилка',
+      message: 'Не вдалося підключитися до Redis',
       error: error.message,
     });
   }
@@ -1163,55 +1074,18 @@ app.get('/select-test', checkAuth, async (req, res) => {
         <body>
           <h1>Виберіть тест</h1>
           <div class="tests">
-            ${Object.entries(testNames)
-              .map(
-                ([num, data]) => `
+            ${Object.entries(testNames).map(([num, data]) => `
               <button onclick="window.location.href='/test/start?testNumber=${num}'">${data.name}</button>
-            `
-              )
-              .join('')}
+            `).join('')}
             <button onclick="window.location.href='/logout'">Вийти</button>
           </div>
         </body>
       </html>
     `);
-    logger.info(
-      `GET /select-test завершено, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`GET /select-test завершено, тривалість ${Date.now() - startTime}мс`);
   } catch (err) {
-    logger.error(
-      `Помилка в GET /select-test, тривалість ${Date.now() - startTime}мс: ${err.message}`,
-      { stack: err.stack }
-    );
+    logger.error(`Помилка в GET /select-test, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
     res.status(500).send('Помилка сервера');
-  }
-});
-
-// Тестовий маршрут для перевірки Redis
-app.get('/test-redis', async (req, res) => {
-  const startTime = Date.now();
-  logger.info('Обробка GET /test-redis');
-
-  try {
-    if (!redisReady) {
-      throw new Error('Redis недоступний');
-    }
-    await redis.set('test-key', 'test-value');
-    const value = await redis.get('test-key');
-    res.status(200).json({
-      status: 'OK',
-      redisStatus: 'Підключений',
-      testValue: value,
-      timestamp: new Date().toISOString(),
-    });
-    logger.info(`GET /test-redis завершено, тривалість ${Date.now() - startTime}мс`);
-  } catch (error) {
-    logger.error(`Помилка в GET /test-redis: ${error.message}`, { stack: error.stack });
-    res.status(500).json({
-      status: 'Помилка',
-      message: 'Не вдалося підключитися до Redis',
-      error: error.message,
-    });
   }
 });
 
@@ -1227,13 +1101,8 @@ app.get('/test/start', checkAuth, async (req, res) => {
       return res.status(400).send('Тест не знайдено');
     }
 
-    const questions = await loadQuestions(
-      testNames[testNumber].questionsFile
-    ).catch(err => {
-      logger.error(
-        `Помилка завантаження питань для тесту ${testNumber}, тривалість ${Date.now() - startTime}мс: ${err.message}`,
-        { stack: err.stack }
-      );
+    const questions = await loadQuestions(testNames[testNumber].questionsFile).catch(err => {
+      logger.error(`Помилка завантаження питань для тесту ${testNumber}, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
       throw err;
     });
 
@@ -1247,15 +1116,10 @@ app.get('/test/start', checkAuth, async (req, res) => {
     };
 
     await setUserTest(req.user, userTest);
-    logger.info(
-      `Тест ${testNumber} розпочато для користувача ${req.user}, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`Тест ${testNumber} розпочато для користувача ${req.user}, тривалість ${Date.now() - startTime}мс`);
     res.redirect('/test/question?index=0');
   } catch (err) {
-    logger.error(
-      `Помилка в GET /test/start, тривалість ${Date.now() - startTime}мс: ${err.message}`,
-      { stack: err.stack }
-    );
+    logger.error(`Помилка в GET /test/start, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
     res.status(500).send('Помилка сервера');
   }
 });
@@ -1272,34 +1136,19 @@ app.get('/test/question', checkAuth, async (req, res) => {
       return res.status(400).send('Тест не розпочато');
     }
 
-    const {
-      questions,
-      testNumber,
-      answers,
-      startTime: testStartTime,
-    } = userTest;
+    const { questions, testNumber, answers, startTime: testStartTime } = userTest;
     const index = parseInt(req.query.index) || 0;
     if (isNaN(index) || index < 0 || index >= questions.length) {
-      logger.warn(
-        `Невірний індекс питання ${index} для користувача ${req.user}`
-      );
+      logger.warn(`Невірний індекс питання ${index} для користувача ${req.user}`);
       return res.status(400).send('Невірний номер питання');
     }
 
     const q = questions[index];
-    const progress = questions
-      .map(
-        (_, i) =>
-          `<span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; margin: 2px; background-color: ${i === index ? '#007bff' : answers[i] ? '#28a745' : '#ccc'}; color: white; font-size: 14px;">${i + 1}</span>`
-      )
-      .join('');
+    const progress = questions.map((_, i) => `<span style="display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; margin: 2px; background-color: ${i === index ? '#007bff' : answers[i] ? '#28a745' : '#ccc'}; color: white; font-size: 14px;">${i + 1}</span>`).join('');
 
-    const timeRemaining =
-      testNames[testNumber].timeLimit * 1000 - (Date.now() - testStartTime);
+    const timeRemaining = testNames[testNumber].timeLimit * 1000 - (Date.now() - testStartTime);
     if (timeRemaining <= 0) {
-      logger.info(
-        `Часовий ліміт вичерпано для користувача ${req.user}, перенаправляємо на завершення`
-      );
+      logger.info(`Часовий ліміт вичерпано для користувача ${req.user}, перенаправляємо на завершення`);
       return res.redirect('/test/finish');
     }
 
@@ -1453,27 +1302,25 @@ app.get('/test/question', checkAuth, async (req, res) => {
             <input type="hidden" name="index" value="${index}">
             <div class="options" id="options">
               ${
-                q.options && q.options.length > 0
-                  ? q.options
-                      .map((option, i) => {
+                q.type === 'input'
+                  ? `<input type="text" name="answer" value="${answers[index] || ''}" placeholder="Введіть відповідь">`
+                  : q.options && q.options.length > 0
+                    ? q.options.map((option, i) => {
                         if (q.type === 'ordering') {
                           const userAnswer = answers[index] || q.options;
                           const idx = userAnswer.indexOf(option);
                           return `<div class="option ordering" draggable="true" data-index="${i}" style="order: ${idx}">${option}</div>`;
                         } else {
-                          const isSelected =
-                            answers[index] &&
-                            answers[index].includes(String(option));
+                          const isSelected = answers[index] && answers[index].includes(String(option));
                           return `
-                    <label class="option${isSelected ? ' selected' : ''}">
-                      <input type="${q.type === 'multiple' ? 'checkbox' : 'radio'}" name="answer" value="${option}" style="display: none;" ${isSelected ? 'checked' : ''}>
-                      ${option}
-                    </label>
-                  `;
+                            <label class="option${isSelected ? ' selected' : ''}">
+                              <input type="${q.type === 'multiple' ? 'checkbox' : 'radio'}" name="answer" value="${option}" style="display: none;" ${isSelected ? 'checked' : ''}>
+                              ${option}
+                            </label>
+                          `;
                         }
-                      })
-                      .join('')
-                  : `<input type="text" name="answer" value="${answers[index] || ''}" placeholder="Введіть відповідь">`
+                      }).join('')
+                    : ''
               }
             </div>
             <div class="buttons">
@@ -1564,14 +1411,9 @@ app.get('/test/question', checkAuth, async (req, res) => {
         </body>
       </html>
     `);
-    logger.info(
-      `GET /test/question завершено, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`GET /test/question завершено, тривалість ${Date.now() - startTime}мс`);
   } catch (err) {
-    logger.error(
-      `Помилка в GET /test/question, тривалість ${Date.now() - startTime}мс: ${err.message}`,
-      { stack: err.stack }
-    );
+    logger.error(`Помилка в GET /test/question, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
     res.status(500).send('Помилка сервера');
   }
 });
@@ -1590,24 +1432,16 @@ app.post('/test/save-answer', checkAuth, async (req, res) => {
 
     const { index, answer } = req.body;
     const idx = parseInt(index);
-    const {
-      questions,
-      answers,
-      testNumber,
-      startTime: testStartTime,
-    } = userTest;
+    const { questions, answers, testNumber, startTime: testStartTime } = userTest;
 
     if (isNaN(idx) || idx < 0 || idx >= questions.length) {
       logger.warn(`Невірний індекс питання ${idx} для користувача ${req.user}`);
       return res.status(400).send('Невірний номер питання');
     }
 
-    const timeRemaining =
-      testNames[testNumber].timeLimit * 1000 - (Date.now() - testStartTime);
+    const timeRemaining = testNames[testNumber].timeLimit * 1000 - (Date.now() - testStartTime);
     if (timeRemaining <= 0) {
-      logger.info(
-        `Часовий ліміт вичерпано для користувача ${req.user}, перенаправляємо на завершення`
-      );
+      logger.info(`Часовий ліміт вичерпано для користувача ${req.user}, перенаправляємо на завершення`);
       return res.redirect('/test/finish');
     }
 
@@ -1625,21 +1459,14 @@ app.post('/test/save-answer', checkAuth, async (req, res) => {
     await setUserTest(req.user, userTest);
 
     if (idx === questions.length - 1) {
-      logger.info(
-        `Останнє питання відповіло користувачем ${req.user}, перенаправляємо на завершення, тривалість ${Date.now() - startTime}мс`
-      );
+      logger.info(`Останнє питання відповіло користувачем ${req.user}, перенаправляємо на завершення, тривалість ${Date.now() - startTime}мс`);
       return res.redirect('/test/finish');
     } else {
-      logger.info(
-        `Відповідь збережена для питання ${idx} користувачем ${req.user}, перенаправляємо на наступне, тривалість ${Date.now() - startTime}мс`
-      );
+      logger.info(`Відповідь збережена для питання ${idx} користувачем ${req.user}, перенаправляємо на наступне, тривалість ${Date.now() - startTime}мс`);
       return res.redirect(`/test/question?index=${idx + 1}`);
     }
   } catch (err) {
-    logger.error(
-      `Помилка в POST /test/save-answer, тривалість ${Date.now() - startTime}мс: ${err.message}`,
-      { stack: err.stack }
-    );
+    logger.error(`Помилка в POST /test/save-answer, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
     res.status(500).send('Помилка сервера');
   }
 });
@@ -1656,13 +1483,7 @@ app.get('/test/finish', checkAuth, async (req, res) => {
       return res.status(400).send('Тест не розпочато');
     }
 
-    const {
-      testNumber,
-      questions,
-      answers,
-      startTime: testStartTime,
-      suspiciousBehavior,
-    } = userTest;
+    const { testNumber, questions, answers, startTime: testStartTime, suspiciousBehavior } = userTest;
     const endTime = Date.now();
 
     let score = 0;
@@ -1670,12 +1491,8 @@ app.get('/test/finish', checkAuth, async (req, res) => {
     questions.forEach((q, idx) => {
       const userAnswer = answers[idx];
       let questionScore = 0;
-      if (!q.options || q.options.length === 0) {
-        if (
-          userAnswer &&
-          String(userAnswer).trim().toLowerCase() ===
-            String(q.correctAnswers[0]).trim().toLowerCase()
-        ) {
+      if (q.type === 'input') {
+        if (userAnswer && String(userAnswer).trim().toLowerCase() === String(q.correctAnswers[0]).trim().toLowerCase()) {
           questionScore = q.points;
         }
       } else if (q.type === 'multiple' && userAnswer && userAnswer.length > 0) {
@@ -1697,26 +1514,12 @@ app.get('/test/finish', checkAuth, async (req, res) => {
         ) {
           questionScore = q.points;
         }
-      } else if (q.type === 'single' && userAnswer) {
-        if (String(userAnswer).trim() === String(q.correctAnswers[0]).trim()) {
-          questionScore = q.points;
-        }
       }
       score += questionScore;
       totalPoints += q.points;
     });
 
-    await saveResult(
-      req.user,
-      testNumber,
-      score,
-      totalPoints,
-      testStartTime,
-      endTime,
-      suspiciousBehavior,
-      answers,
-      questions
-    );
+    await saveResult(req.user, testNumber, score, totalPoints, testStartTime, endTime, suspiciousBehavior, answers, questions);
     await deleteUserTest(req.user);
 
     res.send(`
@@ -1788,14 +1591,9 @@ app.get('/test/finish', checkAuth, async (req, res) => {
         </body>
       </html>
     `);
-    logger.info(
-      `GET /test/finish завершено для користувача ${req.user}, тривалість ${Date.now() - startTime}мс`
-    );
+    logger.info(`GET /test/finish завершено для користувача ${req.user}, тривалість ${Date.now() - startTime}мс`);
   } catch (err) {
-    logger.error(
-      `Помилка в GET /test/finish, тривалість ${Date.now() - startTime}мс: ${err.message}`,
-      { stack: err.stack }
-    );
+    logger.error(`Помилка в GET /test/finish, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
     res.status(500).send('Помилка сервера');
   }
 });
@@ -1817,14 +1615,9 @@ app.get('/admin', checkAdmin, async (req, res) => {
       const testNumber = result.testNumber;
       if (!questionsByTest[testNumber]) {
         try {
-          questionsByTest[testNumber] = await loadQuestions(
-            testNames[testNumber].questionsFile
-          );
+          questionsByTest[testNumber] = await loadQuestions(testNames[testNumber].questionsFile);
         } catch (error) {
-          logger.error(
-            `Помилка завантаження питань для тесту ${testNumber}: ${error.message}`,
-            { stack: error.stack }
-          );
+          logger.error(`Помилка завантаження питань для тесту ${testNumber}: ${error.message}`, { stack: error.stack });
           questionsByTest[testNumber] = [];
         }
       }
@@ -1858,7 +1651,7 @@ app.get('/admin', checkAdmin, async (req, res) => {
             <button onclick="window.location.href='/admin/edit-tests'">Редагувати тести</button>
             <button onclick="window.location.href='/admin/view-results'">Перегляд результатів тестів</button>
             <button onclick="deleteResults()">Видалити результати тестів</button>
-            <button onclick="window.location.href='/logout'">Вийти</button>
+                        <button onclick="window.location.href='/logout'">Вийти</button>
           </div>
           <h2>Результати тестів</h2>
           <table>
