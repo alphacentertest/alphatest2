@@ -1,5 +1,7 @@
 {
-  "version": 2,
+  "engines": {
+    "node": "22.x"
+  },
   "builds": [
     {
       "src": "server.js",
@@ -11,8 +13,5 @@
       "src": "/(.*)",
       "dest": "server.js"
     }
-  ],
-  "env": {
-    "NODE_ENV": "production"
-  }
+  ]
 }

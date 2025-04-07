@@ -60,10 +60,11 @@ const redis = new Redis(process.env.REDIS_URL, {
   },
   enableOfflineQueue: true,
   enableReadyCheck: true,
+  keepAlive: 30000,
   tls: process.env.REDIS_URL && (process.env.REDIS_URL.includes('upstash.io') || process.env.REDIS_URL.includes('redis-cloud.com'))
     ? {
         minVersion: 'TLSv1.2',
-        rejectUnauthorized: false, // Для продакшена лучше включить проверку сертификатов
+        rejectUnauthorized: process.env.NODE_ENV === 'production',
       }
     : undefined,
 });
@@ -83,7 +84,8 @@ redis.on('error', (err) => {
     message: err.message,
     stack: err.stack,
     status: redis.status,
-    redisUrl: process.env.REDIS_URL,
+    redisUrl: process.env.REDIS_URL ? process.env.REDIS_URL.replace(/:[^@]+@/, ':<password>@') : 'Not set',
+    tlsConfig: redis.options.tls || 'Not set',
   });
 });
 
@@ -280,6 +282,8 @@ const loadUsers = async () => {
       } catch (redisError) {
         logger.error(`Error fetching users from Redis cache: ${redisError.message}`, { stack: redisError.stack });
       }
+    } else {
+      logger.warn('Redis is not available, skipping cache check');
     }
 
     const blobs = await listVercelBlobs();
@@ -330,6 +334,8 @@ const loadUsers = async () => {
       } catch (redisError) {
         logger.error(`Error caching users in Redis: ${redisError.message}`, { stack: redisError.stack });
       }
+    } else {
+      logger.warn('Redis is not available, skipping cache set');
     }
 
     logger.info(`Loaded ${users.length} users from Vercel Blob Storage, took ${Date.now() - startTime}ms`);
@@ -567,26 +573,6 @@ const initializeServer = async () => {
 
   logger.info('Attempting to connect to Redis...');
   try {
-    redis = new Redis(process.env.REDIS_URL, {
-      tls: {
-        ca: fs.readFileSync('/path/to/redis-ca-cert.pem'), // Укажите путь к CA-сертификату
-        rejectUnauthorized: true, // Включаем проверку сертификата
-      },
-      retryStrategy: (times) => {
-        logger.warn(`Retrying Redis connection, attempt ${times}`);
-        return Math.min(times * 50, 2000);
-      },
-    });
-
-    redis.on('error', (err) => {
-      logger.error('Redis Client Error:', { message: err.message, stack: err.stack });
-      redisReady = false;
-    });
-    redis.on('connect', () => {
-      logger.info('Connected to Redis');
-      redisReady = true;
-    });
-
     await redis.ping();
     logger.info('Redis connection successful');
   } catch (error) {
@@ -836,6 +822,37 @@ app.post(
     }
   }
 );
+
+app.get('/health', async (req, res) => {
+  const startTime = Date.now();
+  logger.info('Handling GET /health');
+
+  try {
+    const redisStatus = redisReady ? 'Connected' : 'Disconnected';
+    let redisPing = 'Not tested';
+    if (redisReady) {
+      redisPing = await redis.ping();
+    }
+
+    res.status(200).json({
+      status: 'OK',
+      redis: {
+        status: redisStatus,
+        ping: redisPing,
+      },
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+    });
+    logger.info(`GET /health completed, took ${Date.now() - startTime}ms`);
+  } catch (error) {
+    logger.error(`Error in GET /health, took ${Date.now() - startTime}ms: ${error.message}`, { stack: error.stack });
+    res.status(500).json({
+      status: 'Error',
+      message: 'Health check failed',
+      error: error.message,
+    });
+  }
+});
 
 // Выбор теста
 app.get('/select-test', checkAuth, async (req, res) => {
@@ -1631,7 +1648,8 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
 
     let blob;
     try {
-      blob = await put(questionsFileName, fs.readFileSync(file.path), { access: 'public', token: process.env.BLOB_READ_WRITE_TOKEN });
+      const fileBuffer = await fs.promises.readFile(file.path); // Use async readFile
+      blob = await put(questionsFileName, fileBuffer, { access: 'public', token: process.env.BLOB_READ_WRITE_TOKEN });
     } catch (blobError) {
       logger.error('Ошибка при загрузке в Vercel Blob:', blobError);
       throw new Error('Не удалось загрузить файл в хранилище');
@@ -1641,7 +1659,7 @@ app.post('/admin/create-test', checkAdmin, upload.single('questionsFile'), async
     if (redisReady) {
       await redis.set('testNames', JSON.stringify(testNames));
     }
-    fs.unlinkSync(file.path);
+    await fs.promises.unlink(file.path); // Use async unlink
 
     logger.info(`Test ${newTestNumber} created, took ${Date.now() - startTime}ms`);
     res.redirect('/admin');
