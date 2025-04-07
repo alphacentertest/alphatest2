@@ -4,7 +4,7 @@
       "src": "server.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["data/**"]
+        "includeFiles": ["users.xlsx", "questions1.xlsx", "questions2.xlsx"]
       }
     }
   ],

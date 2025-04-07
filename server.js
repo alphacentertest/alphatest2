@@ -18,7 +18,7 @@ app.use(session({
   secret: 'your-secret-key', // Замените на свой секретный ключ
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false } // Для локального тестирования secure: false, на Vercel установите secure: true
+  cookie: { secure: process.env.NODE_ENV === 'production' } // Для Vercel secure: true
 }));
 
 // Логирование всех запросов
@@ -33,11 +33,17 @@ let users = [];
 // Загрузка пользователей из users.xlsx
 const loadUsers = async () => {
   try {
-    const filePath = path.join(process.cwd(), 'data', 'users.xlsx');
+    const filePath = path.join(process.cwd(), 'users.xlsx');
     console.log(`Проверка наличия файла: ${filePath}`);
     if (!fsSync.existsSync(filePath)) {
-      console.error(`Файл пользователей ${filePath} не найден`);
-      return [];
+      // Попробуем альтернативный путь для Vercel
+      const alternativePath = path.join('/vercel/path0', 'users.xlsx');
+      console.log(`Альтернативный путь для Vercel: ${alternativePath}`);
+      if (!fsSync.existsSync(alternativePath)) {
+        console.error(`Файл пользователей не найден ни по пути ${filePath}, ни по пути ${alternativePath}`);
+        return [];
+      }
+      filePath = alternativePath;
     }
 
     const workbook = new ExcelJS.Workbook();
@@ -73,11 +79,17 @@ const loadUsers = async () => {
 // Загрузка вопросов из файла questionsX.xlsx
 const loadQuestions = async (questionsFile) => {
   try {
-    const filePath = path.join(process.cwd(), 'data', questionsFile);
+    const filePath = path.join(process.cwd(), questionsFile);
     console.log(`Проверка наличия файла вопросов: ${filePath}`);
     if (!fsSync.existsSync(filePath)) {
-      console.error(`Файл вопросов ${filePath} не найден`);
-      return [];
+      // Попробуем альтернативный путь для Vercel
+      const alternativePath = path.join('/vercel/path0', questionsFile);
+      console.log(`Альтернативный путь для Vercel: ${alternativePath}`);
+      if (!fsSync.existsSync(alternativePath)) {
+        console.error(`Файл вопросов не найден ни по пути ${filePath}, ни по пути ${alternativePath}`);
+        return [];
+      }
+      filePath = alternativePath;
     }
 
     const workbook = new ExcelJS.Workbook();
