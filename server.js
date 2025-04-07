@@ -1,14 +1,11 @@
 // Імпорт необхідних модулів
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs').promises; // Асинхронні методи fs
 const fsSync = require('fs'); // Синхронні методи fs
 const logger = require(path.join(__dirname, 'logger'));
-const AWS = require('aws-sdk');
-const { put, list } = require('@vercel/blob');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -23,11 +20,6 @@ const Redis = require('ioredis');
 // Перевірка необхідних змінних середовища
 const requiredEnvVars = [
   'REDIS_URL',
-  'BLOB_READ_WRITE_TOKEN',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_REGION',
-  'S3_BUCKET_NAME',
   'ADMIN_PASSWORD_HASH',
   'SESSION_SECRET',
 ];
@@ -39,7 +31,7 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
-// Ініціалізація Express додатку
+// Ініці Wалізація Express додатку
 const app = express();
 
 // Ендпоінт для перевірки версії Node.js
@@ -118,22 +110,6 @@ const waitForRedis = () => {
   });
 };
 
-// Налаштування AWS S3
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION,
-});
-
-// Базовий URL для Vercel Blob Storage
-const BLOB_BASE_URL = process.env.BLOB_BASE_URL || 'https://qqeygegbb01p35fz.public.blob.vercel-storage.com';
-
-// Динамічний імпорт для node-fetch
-const getFetch = async () => {
-  const { default: fetch } = await import('node-fetch');
-  return fetch;
-};
-
 // Налаштування middleware
 app.set('trust proxy', 1);
 app.use(express.json());
@@ -175,7 +151,7 @@ const sessionOptions = {
 
   // Налаштування CSRF-захисту після сесій
   const csrfProtection = csrf({ cookie: false });
-  // Додаємо CSRF-захист для всіх маршрутів, крім /login (тимчасово для відладки)
+  // Додаємо CSRF-захист для всіх маршрутів, крім /login
   app.use((req, res, next) => {
     if (req.path === '/login') {
       return next();
@@ -222,23 +198,6 @@ const sessionOptions = {
   app.use('/login', loginLimiter);
 })();
 
-// Налаштування Multer для завантаження файлів
-const uploadDir = '/tmp/uploads';
-if (!fsSync.existsSync(uploadDir)) {
-  fsSync.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  },
-});
-const upload = multer({ storage });
-
 // Глобальні змінні
 let validPasswords = {};
 let users = [];
@@ -262,7 +221,7 @@ const ensureInitialized = (req, res, next) => {
 app.use((req, res, next) => {
   if (
     req.path === '/node-version' ||
-    req.path === '/' ||
+    req.path === '/login' ||
     req.path === '/favicon.ico' ||
     req.path === '/favicon.png' ||
     req.path === '/test-redis'
@@ -280,48 +239,29 @@ const formatDuration = seconds => {
   return `${hours > 0 ? hours + ' год ' : ''}${minutes > 0 ? minutes + ' хв ' : ''}${secs} с`;
 };
 
-// Список файлів з Vercel Blob Storage
-const listVercelBlobs = async () => {
-  try {
-    logger.info('Спроба отримати список файлів з Vercel Blob Storage');
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      throw new Error('BLOB_READ_WRITE_TOKEN не визначений');
-    }
-    const result = await list({
-      token: process.env.BLOB_READ_WRITE_TOKEN,
-    });
-    logger.info(`Успішно отримано ${result.blobs.length} файлів з Vercel Blob Storage`);
-    return result.blobs || [];
-  } catch (error) {
-    logger.error('Не вдалося отримати список файлів з Vercel Blob Storage:', {
-      message: error.message,
-      stack: error.stack,
-      token: process.env.BLOB_READ_WRITE_TOKEN ? 'Токен присутній' : 'Токен відсутній',
-    });
-    throw error;
-  }
-};
-
-// Завантаження назв тестів динамічно
+// Завантаження назв тестів з локальних файлів
 const loadTestNames = async () => {
   const startTime = Date.now();
-  logger.info('Завантаження назв тестів динамічно');
+  logger.info('Завантаження назв тестів з локальних файлів');
 
   try {
-    const blobs = await listVercelBlobs();
-    const questionFiles = blobs.filter(
-      blob => blob.pathname.startsWith('questions') && blob.pathname.endsWith('.xlsx')
-    );
+    const dataDir = 'C:\\Users\\roman\\Программирование\\test-with-password\\alphatest2\\data';
+    const questionFiles = ['questions1.xlsx', 'questions2.xlsx'];
 
     testNames = {};
-    questionFiles.forEach((blob, index) => {
-      const testNumber = String(index + 1);
-      testNames[testNumber] = {
-        name: `Тест ${testNumber}`,
-        timeLimit: 3600,
-        questionsFile: blob.pathname,
-      };
-    });
+    for (let i = 0; i < questionFiles.length; i++) {
+      const filePath = path.join(dataDir, questionFiles[i]);
+      if (fsSync.existsSync(filePath)) {
+        const testNumber = String(i + 1);
+        testNames[testNumber] = {
+          name: `Тест ${testNumber}`,
+          timeLimit: 3600,
+          questionsFile: questionFiles[i],
+        };
+      } else {
+        logger.warn(`Файл ${filePath} не знайдено`);
+      }
+    }
 
     if (redisReady) {
       try {
@@ -332,18 +272,18 @@ const loadTestNames = async () => {
       }
     }
 
-    logger.info(`Завантажено ${Object.keys(testNames).length} тестів динамічно, тривалість ${Date.now() - startTime}мс`);
+    logger.info(`Завантажено ${Object.keys(testNames).length} тестів з локальних файлів, тривалість ${Date.now() - startTime}мс`);
   } catch (error) {
     logger.error(`Не вдалося завантажити назви тестів, тривалість ${Date.now() - startTime}мс: ${error.message}`, { stack: error.stack });
     testNames = {};
   }
 };
 
-// Завантаження користувачів з Vercel Blob Storage
+// Завантаження користувачів з локального файлу users.xlsx
 const loadUsers = async () => {
   const startTime = Date.now();
   const cacheKey = 'users';
-  logger.info('Спроба завантаження користувачів з Vercel Blob Storage...');
+  logger.info('Спроба завантаження користувачів з локального файлу...');
 
   try {
     if (redisReady) {
@@ -360,24 +300,14 @@ const loadUsers = async () => {
       logger.warn('Redis недоступний, пропускаємо перевірку кешу');
     }
 
-    const blobs = await listVercelBlobs();
-    const userFile = blobs.find(blob => blob.pathname.startsWith('users-'));
-    if (!userFile) {
-      logger.warn('Файл користувачів не знайдено у Vercel Blob Storage');
+    const filePath = 'C:\\Users\\roman\\Программирование\\test-with-password\\alphatest2\\data\\users.xlsx';
+    if (!fsSync.existsSync(filePath)) {
+      logger.warn(`Файл користувачів ${filePath} не знайдено`);
       return [];
     }
 
-    const blobUrl = userFile.url;
-    logger.info(`Завантаження користувачів з URL: ${blobUrl}`);
-    const fetch = await getFetch();
-    const response = await fetch(blobUrl);
-    if (!response.ok) {
-      throw new Error(`Не вдалося завантажити файл ${blobUrl}: ${response.statusText}`);
-    }
-    const buffer = Buffer.from(await response.arrayBuffer());
-
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.readFile(filePath);
 
     let sheet = workbook.getWorksheet('Users');
     if (!sheet) {
@@ -412,15 +342,15 @@ const loadUsers = async () => {
       logger.warn('Redis недоступний, пропускаємо збереження в кеш');
     }
 
-    logger.info(`Завантажено ${users.length} користувачів з Vercel Blob Storage, тривалість ${Date.now() - startTime}мс`);
+    logger.info(`Завантажено ${users.length} користувачів з локального файлу, тривалість ${Date.now() - startTime}мс`);
     return users;
   } catch (error) {
-    logger.error(`Помилка завантаження користувачів з Blob Storage, тривалість ${Date.now() - startTime}мс: ${error.message}`, { stack: error.stack });
+    logger.error(`Помилка завантаження користувачів з локального файлу, тривалість ${Date.now() - startTime}мс: ${error.message}`, { stack: error.stack });
     return [];
   }
 };
 
-// Завантаження питань для тесту з кешуванням
+// Завантаження питань для тесту з локальних файлів
 const loadQuestions = async questionsFile => {
   const startTime = Date.now();
   const cacheKey = `questions:${questionsFile}`;
@@ -446,17 +376,14 @@ const loadQuestions = async questionsFile => {
       }
     }
 
-    const blobUrl = `${BLOB_BASE_URL}/${questionsFile}`;
-    logger.info(`Завантаження питань з URL: ${blobUrl}`);
-    const fetch = await getFetch();
-    const response = await fetch(blobUrl);
-    if (!response.ok) {
-      throw new Error(`Не вдалося завантажити файл ${blobUrl}: ${response.statusText}`);
+    const filePath = `C:\\Users\\roman\\Программирование\\test-with-password\\alphatest2\\data\\${questionsFile}`;
+    if (!fsSync.existsSync(filePath)) {
+      logger.warn(`Файл питань ${filePath} не знайдено`);
+      return [];
     }
-    const buffer = Buffer.from(await response.arrayBuffer());
 
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.readFile(filePath);
 
     let sheet = workbook.getWorksheet('Questions') || workbook.getWorksheet('Sheet1');
     if (!sheet) {
@@ -620,7 +547,7 @@ const saveResult = async (
 const checkAuth = (req, res, next) => {
   if (!req.session.user) {
     logger.warn('Спроба несанкціонованого доступу');
-    return res.redirect('/');
+    return res.redirect('/login');
   }
   req.user = req.session.user;
   next();
@@ -682,7 +609,7 @@ const initializeServer = async () => {
       await loadTestNames();
     }
     if (Object.keys(testNames).length === 0) {
-      logger.warn('Не знайдено жодного тесту. Перевірте наявність файлів questions*.xlsx у Vercel Blob Storage.');
+      logger.warn('Не знайдено жодного тесту. Перевірте наявність файлів questions1.xlsx та questions2.xlsx у папці data.');
     }
   } catch (error) {
     logger.error('Не вдалося завантажити назви тестів:', { message: error.message, stack: error.stack });
@@ -693,7 +620,7 @@ const initializeServer = async () => {
   try {
     users = await loadUsers();
     if (users.length === 0) {
-      logger.warn('Не знайдено жодного користувача. Перевірте наявність файлу users.xlsx у Vercel Blob Storage.');
+      logger.warn('Не знайдено жодного користувача. Перевірте наявність файлу users.xlsx у папці data.');
     }
     await initializePasswords();
   } catch (error) {
@@ -706,9 +633,9 @@ const initializeServer = async () => {
 };
 
 // Головна сторінка (вхід)
-app.get('/', async (req, res) => {
+app.get('/login', async (req, res) => {
   const startTime = Date.now();
-  logger.info('Обробка GET /');
+  logger.info('Обробка GET /login');
 
   try {
     if (!isInitialized) {
@@ -861,7 +788,7 @@ app.get('/', async (req, res) => {
       </html>
     `);
   } catch (err) {
-    logger.error(`Помилка в GET /, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
+    logger.error(`Помилка в GET /login, тривалість ${Date.now() - startTime}мс: ${err.message}`, { stack: err.stack });
     res.status(500).send('Помилка сервера');
   }
 });
@@ -886,7 +813,7 @@ app.post(
       if (!isInitialized) {
         logger.warn('Сервер не ініціалізований під час спроби входу');
         return res.redirect(
-          '/?error=' +
+          '/login?error=' +
             encodeURIComponent('Сервер не ініціалізований. Спробуйте пізніше.')
         );
       }
@@ -895,7 +822,7 @@ app.post(
       if (!errors.isEmpty()) {
         logger.warn('Помилки валідації:', errors.array());
         return res.redirect(
-          '/?error=' + encodeURIComponent(errors.array()[0].msg)
+          '/login?error=' + encodeURIComponent(errors.array()[0].msg)
         );
       }
 
@@ -913,7 +840,7 @@ app.post(
 
       if (!authenticatedUser) {
         logger.warn(`Невдала спроба входу з паролем`);
-        return res.redirect('/?error=' + encodeURIComponent('Невірний пароль'));
+        return res.redirect('/login?error=' + encodeURIComponent('Невірний пароль'));
       }
 
       req.session.user = authenticatedUser;
@@ -938,7 +865,7 @@ app.post(
         `Помилка під час входу, тривалість ${Date.now() - startTime}мс: ${error.message}`,
         { stack: error.stack }
       );
-      res.redirect('/?error=' + encodeURIComponent('Помилка сервера'));
+      res.redirect('/login?error=' + encodeURIComponent('Помилка сервера'));
     }
   }
 );
@@ -1785,11 +1712,10 @@ app.get('/admin/create-test', checkAdmin, (req, res) => {
       </head>
       <body>
         <h1>Створити тест</h1>
-        <form id="createTestForm" enctype="multipart/form-data" method="POST" action="/admin/create-test">
+        <form id="createTestForm" method="POST" action="/admin/create-test">
           <input type="hidden" name="_csrf" value="${req.csrfToken()}">
           <input type="text" name="testName" placeholder="Назва тесту" required>
           <input type="number" name="timeLimit" placeholder="Ліміт часу (сек)" required>
-          <input type="file" name="questionsFile" accept=".xlsx" required>
           <button type="submit">Створити</button>
         </form>
         <button onclick="window.location.href='/admin'">Повернутися до адмін-панелі</button>
@@ -1806,43 +1732,20 @@ app.get('/admin/create-test', checkAdmin, (req, res) => {
 app.post(
   '/admin/create-test',
   checkAdmin,
-  upload.single('questionsFile'),
   async (req, res) => {
     const startTime = Date.now();
     logger.info('Обробка POST /admin/create-test');
 
     try {
       const { testName, timeLimit } = req.body;
-      const file = req.file;
 
-      if (!testName || !timeLimit || !file) {
+      if (!testName || !timeLimit) {
         logger.warn('Відсутні обов’язкові поля для створення тесту');
         return res.status(400).send('Усі поля обов’язкові');
       }
 
       const newTestNumber = String(Object.keys(testNames).length + 1);
       const questionsFileName = `questions${newTestNumber}.xlsx`;
-
-      let blob;
-      try {
-        const fileBuffer = await fs.readFile(file.path);
-        blob = await put(questionsFileName, fileBuffer, {
-          access: 'public',
-          token: process.env.BLOB_READ_WRITE_TOKEN,
-        });
-      } catch (blobError) {
-        logger.error('Помилка при завантаженні в Vercel Blob:', blobError);
-        throw new Error('Не вдалося завантажити файл у сховище');
-      } finally {
-        try {
-          await fs.unlink(file.path);
-        } catch (unlinkError) {
-          logger.error(
-            `Помилка видалення завантаженого файлу: ${unlinkError.message}`,
-            { stack: unlinkError.stack }
-          );
-        }
-      }
 
       testNames[newTestNumber] = {
         name: testName,
@@ -1903,7 +1806,7 @@ app.get('/admin/edit-tests', checkAdmin, (req, res) => {
               <input type="number" value="${data.timeLimit}" data-field="timeLimit">
               <label>Файл з питаннями:</label>
               <input type="text" value="${data.questionsFile}" data-field="questionsFile" readonly>
-              <button onclick="saveTest('${num}')">Зберегти</button>
+                            <button onclick="saveTest('${num}')">Зберегти</button>
               <button class="delete-btn" onclick="deleteTest('${num}')">Видалити</button>
             </div>
           `
@@ -2021,27 +1924,6 @@ app.post('/admin/delete-test', checkAdmin, async (req, res) => {
 
     if (redisReady) {
       await redis.set('testNames', JSON.stringify(testNames));
-    }
-
-    try {
-      const blobs = await listVercelBlobs();
-      const blobToDelete = blobs.find(blob => blob.pathname === questionsFile);
-      if (blobToDelete) {
-        await fetch(blobToDelete.url, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
-          },
-        });
-        logger.info(
-          `Файл питань ${questionsFile} видалений з Vercel Blob Storage`
-        );
-      }
-    } catch (blobError) {
-      logger.error(
-        `Не вдалося видалити файл питань ${questionsFile} з Vercel Blob Storage: ${blobError.message}`,
-        { stack: blobError.stack }
-      );
     }
 
     delete questionsByTestCache[questionsFile];
@@ -2217,7 +2099,7 @@ app.get('/logout', (req, res) => {
       logger.info(
         `Користувач успішно вийшов, тривалість ${Date.now() - startTime}мс`
       );
-      res.redirect('/');
+      res.redirect('/login');
     });
   } catch (error) {
     logger.error(
@@ -2284,7 +2166,7 @@ app.use((err, req, res, next) => {
         <h1>Помилка сервера</h1>
         <p>Виникла помилка на сервері: ${xss(err.message)}</p>
         <p>Спробуйте ще раз пізніше або зверніться до адміністратора.</p>
-        <button onclick="window.location.href='/'">Повернутися на головну</button>
+        <button onclick="window.location.href='/login'">Повернутися на головну</button>
       </body>
     </html>
   `);
