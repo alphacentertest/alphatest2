@@ -1,7 +1,7 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 const path = require('path');
-const fsSync = require('fs'); // Синхронные методы fs
+const fsSync = require('fs');
 
 const app = express();
 
@@ -14,17 +14,20 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Глобальные переменные
 let users = [];
+let isAuthenticated = false; // Флаг авторизации
 
 // Загрузка пользователей из users.xlsx
 const loadUsers = async () => {
   try {
-    const filePath = path.join(__dirname, 'data', 'users.xlsx');
+    const filePath = path.join(process.cwd(), 'data', 'users.xlsx');
+    console.log(`Проверка наличия файла: ${filePath}`);
     if (!fsSync.existsSync(filePath)) {
       console.error(`Файл пользователей ${filePath} не найден`);
       return [];
     }
 
     const workbook = new ExcelJS.Workbook();
+    console.log('Чтение файла users.xlsx...');
     await workbook.xlsx.readFile(filePath);
 
     let sheet = workbook.getWorksheet('Users');
@@ -38,13 +41,14 @@ const loadUsers = async () => {
       if (rowNumber > 1) {
         const username = String(row.getCell(1).value || '').trim();
         const password = String(row.getCell(2).value || '').trim();
+        console.log(`Строка ${rowNumber}: username="${username}", password="${password}"`);
         if (username && password) {
           users.push({ username, password });
         }
       }
     });
 
-    console.log(`Загружено ${users.length} пользователей`);
+    console.log(`Загружено ${users.length} пользователей:`, users);
     return users;
   } catch (error) {
     console.error(`Ошибка загрузки пользователей: ${error.message}`);
@@ -55,13 +59,15 @@ const loadUsers = async () => {
 // Загрузка вопросов из файла questionsX.xlsx
 const loadQuestions = async (questionsFile) => {
   try {
-    const filePath = path.join(__dirname, 'data', questionsFile);
+    const filePath = path.join(process.cwd(), 'data', questionsFile);
+    console.log(`Проверка наличия файла вопросов: ${filePath}`);
     if (!fsSync.existsSync(filePath)) {
       console.error(`Файл вопросов ${filePath} не найден`);
       return [];
     }
 
     const workbook = new ExcelJS.Workbook();
+    console.log(`Чтение файла ${questionsFile}...`);
     await workbook.xlsx.readFile(filePath);
 
     let sheet = workbook.getWorksheet('Questions') || workbook.getWorksheet('Sheet1');
@@ -125,7 +131,7 @@ app.get('/login', (req, res) => {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Вход</title>
+        <title>Введіть пароль</title>
         <style>
           body {
             font-size: 16px;
@@ -158,7 +164,18 @@ app.get('/login', (req, res) => {
             display: block;
             margin: 10px 0 5px;
           }
-          input[type="password"] {
+          .password-container {
+            display: flex;
+            align-items: center;
+            position: relative;
+            width: 100%;
+          }
+          .eye-icon {
+            font-size: 20px;
+            cursor: pointer;
+            margin-right: 10px;
+          }
+          input[type="password"], input[type="text"] {
             font-size: 16px;
             padding: 5px;
             width: 100%;
@@ -189,15 +206,31 @@ app.get('/login', (req, res) => {
       </head>
       <body>
         <div class="container">
-          <h1>Вход</h1>
+          <h1>Введіть пароль</h1>
           <form action="/login" method="POST">
             <label>Пароль:</label>
-            <input type="password" name="password" required>
-            <button type="submit">Войти</button>
+            <div class="password-container">
+              <span class="eye-icon" onclick="togglePassword()">👁️</span>
+              <input type="password" id="password" name="password" required>
+            </div>
+            <label><input type="checkbox" name="rememberMe"> Запам'ятати мене</label>
+            <button type="submit">Увійти</button>
           </form>
           <p id="error" class="error"></p>
         </div>
         <script>
+          function togglePassword() {
+            const passwordInput = document.getElementById('password');
+            const eyeIcon = document.querySelector('.eye-icon');
+            if (passwordInput.type === 'password') {
+              passwordInput.type = 'text';
+              eyeIcon.textContent = '🙈';
+            } else {
+              passwordInput.type = 'password';
+              eyeIcon.textContent = '👁️';
+            }
+          }
+
           const urlParams = new URLSearchParams(window.location.search);
           const error = urlParams.get('error');
           if (error) {
@@ -212,30 +245,52 @@ app.get('/login', (req, res) => {
 // Обработка входа
 app.post('/login', async (req, res) => {
   const { password } = req.body;
+  console.log(`Введённый пароль: "${password}"`);
 
   if (!password) {
-    return res.redirect('/login?error=' + encodeURIComponent('Пароль не может быть пустым'));
+    console.log('Пароль пустой');
+    return res.redirect('/login?error=' + encodeURIComponent('Пароль не може бути порожнім'));
+  }
+
+  // Проверяем, загружены ли пользователи
+  if (users.length === 0) {
+    console.log('Список пользователей пуст');
+    return res.redirect('/login?error=' + encodeURIComponent('Помилка сервера: користувачі не завантажені'));
   }
 
   // Проверяем пароль
-  const user = users.find(u => u.password === password.trim());
+  const trimmedPassword = password.trim();
+  console.log(`Пароль после trim: "${trimmedPassword}"`);
+  console.log('Список пользователей:', users);
+  const user = users.find(u => u.password === trimmedPassword);
   if (!user) {
-    return res.redirect('/login?error=' + encodeURIComponent('Неверный пароль'));
+    console.log('Пароль не найден в списке пользователей');
+    return res.redirect('/login?error=' + encodeURIComponent('Пароль невірний'));
   }
 
-  // Если пароль верный, перенаправляем на страницу выбора теста
+  console.log(`Успешная авторизация для пользователя: ${user.username}`);
+  isAuthenticated = true; // Устанавливаем флаг авторизации
   res.redirect('/select-test');
 });
 
+// Middleware для проверки авторизации
+const checkAuth = (req, res, next) => {
+  if (!isAuthenticated) {
+    console.log('Неавторизованный доступ к /select-test');
+    return res.redirect('/login?error=' + encodeURIComponent('Будь ласка, увійдіть'));
+  }
+  next();
+};
+
 // Страница выбора теста
-app.get('/select-test', (req, res) => {
+app.get('/select-test', checkAuth, (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Выбор теста</title>
+        <title>Вибір тесту</title>
         <style>
           body {
             font-size: 32px;
@@ -273,7 +328,7 @@ app.get('/select-test', (req, res) => {
         </style>
       </head>
       <body>
-        <h1>Выберите тест</h1>
+        <h1>Виберіть тест</h1>
         <div class="tests">
           <button onclick="window.location.href='/test/1'">Тест 1</button>
           <button onclick="window.location.href='/test/2'">Тест 2</button>
@@ -284,7 +339,7 @@ app.get('/select-test', (req, res) => {
 });
 
 // Страница теста
-app.get('/test/:testNumber', async (req, res) => {
+app.get('/test/:testNumber', checkAuth, async (req, res) => {
   const { testNumber } = req.params;
   const questionsFile = testNumber === '1' ? 'questions1.xlsx' : 'questions2.xlsx';
   const testName = testNumber === '1' ? 'Тест 1' : 'Тест 2';
@@ -297,12 +352,12 @@ app.get('/test/:testNumber', async (req, res) => {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Ошибка</title>
+          <title>Помилка</title>
         </head>
         <body>
-          <h1>Ошибка</h1>
-          <p>Не удалось загрузить вопросы для ${testName}. Проверьте файл ${questionsFile}.</p>
-          <button onclick="window.location.href='/select-test'">Вернуться к выбору теста</button>
+          <h1>Помилка</h1>
+          <p>Не вдалося завантажити питання для ${testName}. Перевірте файл ${questionsFile}.</p>
+          <button onclick="window.location.href='/select-test'">Повернутися до вибору тесту</button>
         </body>
       </html>
     `);
@@ -372,15 +427,15 @@ app.get('/test/:testNumber', async (req, res) => {
         <h1>${testName}</h1>
         ${questions.map((q, idx) => `
           <div class="question">
-            ${q.picture ? `<img src="${q.picture}" alt="Изображение вопроса" onerror="this.src='/images/placeholder.png'">` : ''}
-            <p>Вопрос ${idx + 1}: ${q.text}</p>
+            ${q.picture ? `<img src="${q.picture}" alt="Зображення питання" onerror="this.src='/images/placeholder.png'">` : ''}
+            <p>Питання ${idx + 1}: ${q.text}</p>
             <div class="options">
               ${q.options.map(opt => `<div class="option">${opt}</div>`).join('')}
             </div>
-            <p>Правильный ответ: ${q.correctAnswers.join(', ')}</p>
+            <p>Правильна відповідь: ${q.correctAnswers.join(', ')}</p>
           </div>
         `).join('')}
-        <button onclick="window.location.href='/select-test'">Вернуться к выбору теста</button>
+        <button onclick="window.location.href='/select-test'">Повернутися до вибору тесту</button>
       </body>
     </html>
   `);
