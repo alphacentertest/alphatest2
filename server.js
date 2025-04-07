@@ -69,11 +69,53 @@ const redis = new Redis(process.env.REDIS_URL, {
   enableReadyCheck: true,
   keepAlive: 30000,
   tls: {
-    minVersion: 'TLSv1.2', // Мінімальна версія TLS
-    rejectUnauthorized: true, // Відхиляємо несертифіковані з’єднання
-    checkServerIdentity: () => undefined, // Обходимо перевірку імені хоста для Upstash
+    minVersion: 'TLSv1.2',
+    rejectUnauthorized: true,
+    checkServerIdentity: () => undefined,
   },
 });
+
+// Функція для очікування підключення до Redis
+const waitForRedis = () => {
+  return new Promise((resolve, reject) => {
+    if (redisReady) {
+      resolve();
+      return;
+    }
+
+    redis.on('ready', () => {
+      redisReady = true;
+      logger.info('Redis готовий приймати команди');
+      resolve();
+    });
+
+    redis.on('error', (err) => {
+      redisReady = false;
+      logger.error('Помилка Redis:', {
+        message: err.message,
+        stack: err.stack,
+        status: redis.status,
+        redisUrl: process.env.REDIS_URL ? process.env.REDIS_URL.replace(/:[^@]+@/, ':<password>@') : 'Не встановлено',
+        tlsConfig: redis.options.tls || 'Не встановлено',
+      });
+      reject(err);
+    });
+
+    redis.on('connect', () => {
+      logger.info('Redis успішно підключений');
+    });
+
+    redis.on('reconnecting', () => {
+      redisReady = false;
+      logger.warn('Redis пере підключенням...');
+    });
+
+    redis.on('end', () => {
+      redisReady = false;
+      logger.warn('З’єднання з Redis закрито');
+    });
+  });
+};
 
 // Обробники подій Redis
 redis.on('connect', () => {
@@ -146,6 +188,20 @@ const sessionOptions = {
     sameSite: 'lax',
   },
 };
+
+// Очікуємо підключення до Redis перед налаштуванням сесій
+(async () => {
+  try {
+    await waitForRedis();
+    app.use(session({
+      ...sessionOptions,
+      store: new RedisStore({ client: redis }),
+    }));
+  } catch (error) {
+    logger.warn('Redis недоступний, використовуємо пам’ять для зберігання сесій');
+    app.use(session(sessionOptions));
+  }
+})();
 
 // Якщо Redis доступний, використовуємо RedisStore, інакше пам’ять
 if (redisReady) {
@@ -721,10 +777,7 @@ const initializeServer = async () => {
     await redis.ping();
     logger.info('Підключення до Redis успішне');
   } catch (error) {
-    logger.error('Не вдалося підключитися до Redis:', {
-      message: error.message,
-      stack: error.stack,
-    });
+    logger.error('Не вдалося підключитися до Redis:', { message: error.message, stack: error.stack });
     redisReady = false;
   }
 
@@ -734,6 +787,7 @@ const initializeServer = async () => {
       const testNamesData = await redis.get('testNames');
       if (testNamesData) {
         testNames = JSON.parse(testNamesData);
+        logger.info('Назви тестів завантажені з Redis');
       } else {
         await loadTestNames();
       }
@@ -741,10 +795,8 @@ const initializeServer = async () => {
       await loadTestNames();
     }
   } catch (error) {
-    logger.error('Не вдалося завантажити назви тестів:', {
-      message: error.message,
-      stack: error.stack,
-    });
+    logger.error('Не вдалося завантажити назви тестів:', { message: error.message, stack: error.stack });
+    testNames = {}; // Продовжуємо роботу, навіть якщо тесты не загрузились
   }
 
   logger.info('Завантаження користувачів...');
@@ -752,10 +804,8 @@ const initializeServer = async () => {
     users = await loadUsers();
     await initializePasswords();
   } catch (error) {
-    logger.error('Не вдалося завантажити користувачів:', {
-      message: error.message,
-      stack: error.stack,
-    });
+    logger.error('Не вдалося завантажити користувачів:', { message: error.message, stack: error.stack });
+    users = []; // Продовжуємо роботу, навіть якщо користувачі не загрузились
   }
 
   logger.info('Ініціалізація сервера завершена');
