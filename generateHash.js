@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 
-const password = 'your-admin-password'; // Replace with your desired admin password
+const password = 'pass111'; // Replace with your desired admin password
 const saltRounds = 10;
 
 bcrypt.hash(password, saltRounds, (err, hash) => {

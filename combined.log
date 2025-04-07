@@ -3687,3 +3687,38 @@
 {"level":"info","message":"Ініціалізація паролів...","timestamp":"2025-04-07T15:30:38.934Z"}
 {"level":"info","message":"Ініціалізовано паролі для 1 користувачів","timestamp":"2025-04-07T15:30:38.935Z"}
 {"level":"info","message":"Ініціалізація сервера завершена","timestamp":"2025-04-07T15:30:38.935Z"}
+{"level":"info","message":"Сервер запущений на порту 3000","timestamp":"2025-04-07T16:34:54.308Z"}
+{"level":"info","message":"Початок ініціалізації сервера...","timestamp":"2025-04-07T16:34:54.312Z"}
+{"level":"info","message":"Перевірка змінних середовища...","timestamp":"2025-04-07T16:34:54.312Z"}
+{"level":"info","message":"Змінна середовища REDIS_URL присутня: redis:<password>@secure-muskrat-44892.upstash.io:6379","timestamp":"2025-04-07T16:34:54.313Z"}
+{"level":"info","message":"Змінна середовища BLOB_READ_WRITE_TOKEN присутня: значення приховане","timestamp":"2025-04-07T16:34:54.313Z"}
+{"level":"info","message":"Змінна середовища AWS_ACCESS_KEY_ID присутня: значення приховане","timestamp":"2025-04-07T16:34:54.313Z"}
+{"level":"info","message":"Змінна середовища AWS_SECRET_ACCESS_KEY присутня: значення приховане","timestamp":"2025-04-07T16:34:54.313Z"}
+{"level":"info","message":"Змінна середовища AWS_REGION присутня: значення приховане","timestamp":"2025-04-07T16:34:54.313Z"}
+{"level":"info","message":"Змінна середовища S3_BUCKET_NAME присутня: значення приховане","timestamp":"2025-04-07T16:34:54.314Z"}
+{"level":"info","message":"Змінна середовища ADMIN_PASSWORD_HASH присутня: значення приховане","timestamp":"2025-04-07T16:34:54.314Z"}
+{"level":"info","message":"Змінна середовища SESSION_SECRET присутня: значення приховане","timestamp":"2025-04-07T16:34:54.314Z"}
+{"level":"info","message":"Завантаження назв тестів...","timestamp":"2025-04-07T16:34:54.315Z"}
+{"level":"info","message":"Завантаження назв тестів динамічно","timestamp":"2025-04-07T16:34:54.315Z"}
+{"level":"info","message":"Спроба отримати список файлів з Vercel Blob Storage","timestamp":"2025-04-07T16:34:54.315Z"}
+{"level":"info","message":"Redis успішно підключений","timestamp":"2025-04-07T16:34:54.404Z"}
+{"level":"info","message":"Redis готовий приймати команди","timestamp":"2025-04-07T16:34:54.476Z"}
+{"level":"info","message":"Сесії налаштовані з Redis","timestamp":"2025-04-07T16:34:54.477Z"}
+{"level":"info","message":"Успішно отримано 3 файлів з Vercel Blob Storage","timestamp":"2025-04-07T16:34:54.609Z"}
+{"level":"info","message":"Назви тестів збережено в Redis","timestamp":"2025-04-07T16:34:54.657Z"}
+{"level":"info","message":"Завантажено 2 тестів динамічно, тривалість 343мс","timestamp":"2025-04-07T16:34:54.658Z"}
+{"level":"info","message":"Завантаження користувачів...","timestamp":"2025-04-07T16:34:54.658Z"}
+{"level":"info","message":"Спроба завантаження користувачів з Vercel Blob Storage...","timestamp":"2025-04-07T16:34:54.658Z"}
+{"level":"info","message":"Спроба отримати список файлів з Vercel Blob Storage","timestamp":"2025-04-07T16:34:54.706Z"}
+{"level":"info","message":"Успішно отримано 3 файлів з Vercel Blob Storage","timestamp":"2025-04-07T16:34:54.895Z"}
+{"level":"warn","message":"Файл користувачів не знайдено у Vercel Blob Storage","timestamp":"2025-04-07T16:34:54.896Z"}
+{"level":"warn","message":"Не знайдено жодного користувача. Перевірте наявність файлу users.xlsx у Vercel Blob Storage.","timestamp":"2025-04-07T16:34:54.897Z"}
+{"level":"info","message":"Ініціалізація паролів...","timestamp":"2025-04-07T16:34:54.897Z"}
+{"level":"info","message":"Ініціалізовано паролі для 1 користувачів","timestamp":"2025-04-07T16:34:54.898Z"}
+{"level":"info","message":"Ініціалізація сервера завершена","timestamp":"2025-04-07T16:34:54.898Z"}
+{"level":"info","message":"Обробка GET /test-redis","timestamp":"2025-04-07T16:35:14.113Z"}
+{"level":"info","message":"GET /test-redis завершено, тривалість 103мс","timestamp":"2025-04-07T16:35:14.216Z"}
+{"level":"info","message":"GET /login - IP: ::1","timestamp":"2025-04-07T16:35:44.811Z"}
+{"level":"info","message":"GET /login завершено за 3мс зі статусом 404","timestamp":"2025-04-07T16:35:44.814Z"}
+{"level":"info","message":"Обробка GET /test-redis","timestamp":"2025-04-07T16:36:19.153Z"}
+{"level":"info","message":"GET /test-redis завершено, тривалість 95мс","timestamp":"2025-04-07T16:36:19.248Z"}
