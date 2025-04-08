@@ -1,25 +1,28 @@
 const express = require('express');
-const ExcelJS = require('exceljs');
-const path = require('path');
-const fsSync = require('fs');
+const Redis = require('ioredis');
 const session = require('express-session');
+const RedisStore = require('connect-redis').default;
 
 const app = express();
+
+// Настройка Redis
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+
+// Настройка хранилища сессий с использованием Redis
+app.use(session({
+  store: new RedisStore({ client: redis }),
+  secret: 'your-secret-key', // Замените на свой секретный ключ
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: process.env.NODE_ENV === 'production' } // Для Vercel secure: true
+}));
 
 // Middleware для обработки форм и JSON
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // Статическая папка для изображений (если есть)
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Настройка сессий
-app.use(session({
-  secret: 'your-secret-key', // Замените на свой секретный ключ
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production' } // Для Vercel secure: true
-}));
+app.use(express.static('public'));
 
 // Логирование всех запросов
 app.use((req, res, next) => {
@@ -30,110 +33,37 @@ app.use((req, res, next) => {
 // Глобальные переменные
 let users = [];
 
-// Загрузка пользователей из users.xlsx
+// Загрузка пользователей из Redis
 const loadUsers = async () => {
   try {
-    let filePath = path.join(process.cwd(), 'users.xlsx');
-    console.log(`Проверка наличия файла: ${filePath}`);
-    if (!fsSync.existsSync(filePath)) {
-      // Попробуем альтернативный путь для Vercel
-      filePath = path.join('/vercel/path0', 'users.xlsx');
-      console.log(`Альтернативный путь для Vercel: ${filePath}`);
-      if (!fsSync.existsSync(filePath)) {
-        console.error(`Файл пользователей не найден ни по пути ${filePath}, ни по альтернативному пути`);
-        return [];
-      }
-    }
-
-    const workbook = new ExcelJS.Workbook();
-    console.log('Чтение файла users.xlsx...');
-    await workbook.xlsx.readFile(filePath);
-
-    let sheet = workbook.getWorksheet('Users');
-    if (!sheet) {
-      console.error('Лист "Users" не найден');
+    const usersData = await redis.get('users');
+    if (!usersData) {
+      console.error('Данные пользователей не найдены в Redis');
       return [];
     }
-
-    const users = [];
-    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber > 1) {
-        const username = String(row.getCell(1).value || '').trim();
-        const password = String(row.getCell(2).value || '').trim();
-        console.log(`Строка ${rowNumber}: username="${username}", password="${password}"`);
-        if (username && password) {
-          users.push({ username, password });
-        }
-      }
-    });
-
-    console.log(`Загружено ${users.length} пользователей:`, users);
+    users = JSON.parse(usersData);
+    console.log(`Загружено ${users.length} пользователей из Redis:`, users);
     return users;
   } catch (error) {
-    console.error(`Ошибка загрузки пользователей: ${error.message}`);
+    console.error(`Ошибка загрузки пользователей из Redis: ${error.message}`);
     return [];
   }
 };
 
-// Загрузка вопросов из файла questionsX.xlsx
-const loadQuestions = async (questionsFile) => {
+// Загрузка вопросов из Redis
+const loadQuestions = async (testNumber) => {
   try {
-    let filePath = path.join(process.cwd(), questionsFile);
-    console.log(`Проверка наличия файла вопросов: ${filePath}`);
-    if (!fsSync.existsSync(filePath)) {
-      // Попробуем альтернативный путь для Vercel
-      filePath = path.join('/vercel/path0', questionsFile);
-      console.log(`Альтернативный путь для Vercel: ${filePath}`);
-      if (!fsSync.existsSync(filePath)) {
-        console.error(`Файл вопросов не найден ни по пути ${filePath}, ни по альтернативному пути`);
-        return [];
-      }
-    }
-
-    const workbook = new ExcelJS.Workbook();
-    console.log(`Чтение файла ${questionsFile}...`);
-    await workbook.xlsx.readFile(filePath);
-
-    let sheet = workbook.getWorksheet('Questions') || workbook.getWorksheet('Sheet1');
-    if (!sheet) {
-      console.error('Лист "Questions" или "Sheet1" не найден');
+    const key = `questions${testNumber}`;
+    const questionsData = await redis.get(key);
+    if (!questionsData) {
+      console.error(`Данные вопросов для теста ${testNumber} не найдены в Redis`);
       return [];
     }
-
-    const questions = [];
-    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber > 1) {
-        const pictureNumber = String(row.getCell(1).value || '').trim();
-        const picture = pictureNumber ? `/images/Picture${pictureNumber}.png` : null;
-        const question = {
-          picture: picture,
-          text: String(row.getCell(2).value || '').trim(),
-          type: String(row.getCell(27).value || 'multiple').trim().toLowerCase(),
-          options: [],
-          correctAnswers: [],
-          points: parseInt(row.getCell(28).value) || 1,
-        };
-
-        // Читаем варианты ответа (столбцы 3–14)
-        for (let i = 3; i <= 14; i++) {
-          const option = row.getCell(i).value;
-          if (option) question.options.push(String(option).trim());
-        }
-
-        // Читаем правильные ответы (столбцы 15–26)
-        for (let i = 15; i <= 26; i++) {
-          const correctAnswer = row.getCell(i).value;
-          if (correctAnswer) question.correctAnswers.push(String(correctAnswer).trim());
-        }
-
-        if (question.text) questions.push(question);
-      }
-    });
-
-    console.log(`Загружено ${questions.length} вопросов из ${questionsFile}`);
+    const questions = JSON.parse(questionsData);
+    console.log(`Загружено ${questions.length} вопросов для теста ${testNumber} из Redis`);
     return questions;
   } catch (error) {
-    console.error(`Ошибка загрузки вопросов из ${questionsFile}: ${error.message}`);
+    console.error(`Ошибка загрузки вопросов для теста ${testNumber} из Redis: ${error.message}`);
     return [];
   }
 };
@@ -143,7 +73,7 @@ const initializeServer = async () => {
   console.log('Инициализация сервера...');
   users = await loadUsers();
   if (users.length === 0) {
-    console.error('Не удалось загрузить пользователей. Проверьте файл users.xlsx.');
+    console.error('Не удалось загрузить пользователей из Redis.');
   }
 };
 
@@ -362,6 +292,7 @@ app.get('/select-test', checkAuth, (req, res) => {
         <div class="tests">
           <button onclick="window.location.href='/test/1'">Тест 1</button>
           <button onclick="window.location.href='/test/2'">Тест 2</button>
+          <button onclick="window.location.href='/test/3'">Тест 3</button>
           <button onclick="window.location.href='/logout'">Вийти</button>
         </div>
       </body>
@@ -372,10 +303,34 @@ app.get('/select-test', checkAuth, (req, res) => {
 // Страница теста
 app.get('/test/:testNumber', checkAuth, async (req, res) => {
   const { testNumber } = req.params;
-  const questionsFile = testNumber === '1' ? 'questions1.xlsx' : 'questions2.xlsx';
-  const testName = testNumber === '1' ? 'Тест 1' : 'Тест 2';
+  let testName;
 
-  const questions = await loadQuestions(questionsFile);
+  // Определяем название теста в зависимости от testNumber
+  if (testNumber === '1') {
+    testName = 'Тест 1';
+  } else if (testNumber === '2') {
+    testName = 'Тест 2';
+  } else if (testNumber === '3') {
+    testName = 'Тест 3';
+  } else {
+    return res.status(404).send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Помилка</title>
+        </head>
+        <body>
+          <h1>Помилка</h1>
+          <p>Тест з номером ${testNumber} не знайдено.</p>
+          <button onclick="window.location.href='/select-test'">Повернутися до вибору тесту</button>
+        </body>
+      </html>
+    `);
+  }
+
+  const questions = await loadQuestions(testNumber);
   if (questions.length === 0) {
     return res.send(`
       <!DOCTYPE html>
@@ -387,7 +342,7 @@ app.get('/test/:testNumber', checkAuth, async (req, res) => {
         </head>
         <body>
           <h1>Помилка</h1>
-          <p>Не вдалося завантажити питання для ${testName}. Перевірте файл ${questionsFile}.</p>
+          <p>Не вдалося завантажити питання для ${testName}.</p>
           <button onclick="window.location.href='/select-test'">Повернутися до вибору тесту</button>
         </body>
       </html>
