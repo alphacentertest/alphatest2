@@ -1,6 +1,1 @@
 node_modules/
-.env
-/tmp
-/dist
-public/face-api.js-master/examples
-.vercel
