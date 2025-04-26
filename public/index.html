@@ -1,117 +1,35 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Вхід</title>
+    <meta charset="UTF-8">
+    <title>Авторизація</title>
     <style>
-      body {
-        font-size: 16px;
-        margin: 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 100vh;
-        flex-direction: column;
-      }
-      .container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        width: 100%;
-        max-width: 400px;
-        padding: 20px;
-        box-sizing: border-box;
-      }
-      h1 {
-        font-size: 24px;
-        margin-bottom: 20px;
-        text-align: center;
-      }
-      form {
-        width: 100%;
-        max-width: 300px;
-      }
-      label {
-        display: block;
-        margin: 10px 0 5px;
-      }
-      input[type='text'],
-      input[type='password'] {
-        font-size: 16px;
-        padding: 5px;
-        width: 100%;
-        box-sizing: border-box;
-      }
-      #password {
-        background-color: #d3d3d3;
-      }
-      button {
-        font-size: 16px;
-        padding: 10px 20px;
-        border: none;
-        border-radius: 5px;
-        background-color: #007bff;
-        color: white;
-        cursor: pointer;
-        margin-top: 10px;
-        display: block;
-        width: 100%;
-      }
-      button:hover {
-        background-color: #0056b3;
-      }
-      .error {
-        color: red;
-        margin-top: 10px;
-        text-align: center;
-      }
-      .password-container {
-        position: relative;
-      }
-      .eye-icon {
-        position: absolute;
-        right: 10px;
-        top: 50%;
-        transform: translateY(-50%);
-        cursor: pointer;
-      }
+      body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+      .container { max-width: 400px; margin: 0 auto; }
+      input[type="password"], button { padding: 10px; margin: 10px; width: 100%; }
+      .show-password { margin-left: 10px; }
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>Вхід</h1>
+      <h1>Введіть пароль</h1>
       <form action="/login" method="POST">
-        <label>Пароль:</label>
-        <div class="password-container">
-          <input
-            type="password"
-            id="password"
-            name="password"
-            value="${savedPassword}"
-            required
-          />
-          <span class="eye-icon" onclick="togglePassword()">👁️</span>
-        </div>
-        <label
-          ><input type="checkbox" name="rememberMe" /> Запам'ятати пароль</label
-        >
-        <button type="submit">Увійти</button>
+        <input type="password" name="password" id="password" placeholder="Пароль" required>
+        <br>
+        <input type="checkbox" id="showPassword" class="show-password">
+        <label for="showPassword">Показати пароль</label>
+        <br>
+        <input type="checkbox" id="rememberMe" name="rememberMe">
+        <label for="rememberMe">Запам’ятати мене</label>
+        <br>
+        <button type="submit">Ввести пароль</button>
       </form>
-      <p id="error" class="error"></p>
     </div>
     <script>
-      function togglePassword() {
+      document.getElementById('showPassword').addEventListener('change', function() {
         const passwordInput = document.getElementById('password');
-        const eyeIcon = document.querySelector('.eye-icon');
-        if (passwordInput.type === 'password') {
-          passwordInput.type = 'text';
-          eyeIcon.textContent = '🙈';
-        } else {
-          passwordInput.type = 'password';
-          eyeIcon.textContent = '👁️';
-        }
-      }
+        passwordInput.type = this.checked ? 'text' : 'password';
+      });
     </script>
   </body>
 </html>
